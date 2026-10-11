@@ -1,0 +1,139 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wps-mcp"
+version = "1.0.0"
+description = "WPS Writer, ET and WPP automation for AI clients"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "ELDment" }]
+keywords = ["mcp", "wps", "automation", "writer", "spreadsheet", "presentation"]
+dependencies = [
+  "mcp>=2.3.0,<3.0.0",
+  "pydantic>=2.0.0,<3.0.0",
+  "anyio>=4.0.0,<5.0.0",
+  "pywin32>=306; sys_platform == 'win32'",
+  "pypdfium2>=4.30.0,<6.0.0",
+  "Pillow>=10.0.0",
+]
+
+[project.scripts]
+wps-mcp = "src.protocol.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src",
+  "tests",
+  "pyproject.toml",
+  "uv.lock",
+  "README.md",
+  "LICENSE",
+  ".editorconfig",
+  ".gitattributes",
+]
+
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "README.md" },
+  { file = "LICENSE" },
+  { file = "src/**/*.py" },
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 79
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "N",
+  "UP",
+  "ANN",
+  "B",
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "D104",
+  "D200",
+  "D205",
+  "D209",
+  "D210",
+  "D211",
+  "D212",
+  "D300",
+  "D400",
+  "D402",
+  "D403",
+  "D404",
+  "D419",
+]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D"]
+
+[tool.ruff.format]
+line-ending = "cr-lf"
+
+[dependency-groups]
+dev = [
+  "build>=1.2",
+  "hatchling>=1.26",
+  "mypy>=1.15",
+  "pyright>=1.1.414",
+  "pytest>=8",
+  "ruff>=0.11",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+  "native: requires installed Windows WPS; edits only test-created files",
+]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "."
+files = ["src"]
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = [".venv", "artifacts", "build", "dist"]
+extraPaths = ["."]
+pythonVersion = "3.11"
+pythonPlatform = "Windows"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+
+[[tool.mypy.overrides]]
+module = [
+  "pythoncom",
+  "pywintypes",
+  "win32com.*",
+  "win32clipboard",
+  "win32con",
+  "pypdfium2.*",
+]
+ignore_missing_imports = true
