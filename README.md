@@ -2,7 +2,7 @@
 
 **让 AI 直接操作你正在使用的 WPS。**
 
-[演示视频](assets/showcase.mp4)
+<https://github.com/user-attachments/assets/59574cdb-c623-48a9-850d-c4488c5acacc>
 
 ## 核心能力
 
@@ -52,7 +52,7 @@ uv sync --locked
     "wps": {
       "command": "uv",
       "args": [
-        "--directory", "/path/to/wps-mcp", // 替换为真实项目路径
+        "--directory", "真实项目路径",
         "run", "wps-mcp"
       ]
     }
@@ -62,7 +62,8 @@ uv sync --locked
 
 </details>
 
-## 许可证
+---
 
-本项目采用 **GNU Affero General Public License v3.0（仅第 3 版，SPDX：`AGPL-3.0-only`）**。
-完整条款见 [LICENSE](LICENSE)。
+<p align="right">
+  <sub>许可证 · <a href="LICENSE" title="GNU Affero General Public License v3.0（仅第 3 版）">AGPL-3.0-only</a></sub>
+</p>
