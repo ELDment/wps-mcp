@@ -1,0 +1,146 @@
+name: Publish to PyPI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize version allocation and upload without dropping pending main pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - run: uv sync --locked --group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pyright
+      - run: uv build
+      - run: uv run pytest -m "not native"
+
+  build:
+    needs: verify
+    if: >-
+      github.repository == 'ELDment/wps-mcp' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.0"
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --locked --group dev
+
+      - name: Prepare dated release
+        shell: uv run --no-sync python {0}
+        run: |
+          import json
+          import os
+          import re
+          import subprocess
+          import tomllib
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.request import urlopen
+
+          projectPath = Path("pyproject.toml")
+          project = tomllib.loads(projectPath.read_text(encoding="utf-8"))
+          packageName = project["project"]["name"]
+          releaseDate = datetime.now(timezone(timedelta(hours=8)))
+          baseVersion = f"{releaseDate.year}.{releaseDate.month}.{releaseDate.day}"
+
+          try:
+              with urlopen(
+                  f"https://pypi.org/pypi/{packageName}/json", timeout=30
+              ) as response:
+                  releases = json.load(response)["releases"]
+          except HTTPError as error:
+              if error.code != 404:
+                  raise
+              releases = {}
+
+          releasePattern = re.compile(
+              rf"{re.escape(baseVersion)}(?:\.post(\d+))?"
+          )
+          revisions = [
+              int(match[1] or 0)
+              for version in releases
+              if (match := releasePattern.fullmatch(version))
+          ]
+          releaseVersion = baseVersion
+          if revisions:
+              releaseVersion += f".post{max(revisions) + 1}"
+
+          sourcePath = Path("src/__init__.py")
+          source, replacements = re.subn(
+              r'^__version__ = "[^"]+"$',
+              f'__version__ = "{releaseVersion}"',
+              sourcePath.read_text(encoding="utf-8"),
+              flags=re.MULTILINE,
+          )
+          if replacements != 1:
+              raise SystemExit("Expected exactly one src.__version__ assignment")
+
+          subprocess.run(
+              ["uv", "version", releaseVersion, "--offline", "--no-sync"],
+              check=True,
+          )
+          sourcePath.write_text(source, encoding="utf-8", newline="\r\n")
+          for path in (projectPath, Path("uv.lock")):
+              content = path.read_text(encoding="utf-8")
+              path.write_text(content, encoding="utf-8", newline="\r\n")
+
+          print(f"Prepared {packageName} {releaseVersion}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"Prepared **{packageName} {releaseVersion}** for PyPI.\n")
+
+      - name: Build distributions with locked build dependencies
+        run: uv build --no-sources --no-build-isolation
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-distributions
+          path: dist/*
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/wps-mcp
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pypi-distributions
+          path: dist/
+      - name: Publish to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A failed upload can be retried using the same built distributions.
+          skip-existing: true
