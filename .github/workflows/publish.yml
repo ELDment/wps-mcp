@@ -104,8 +104,9 @@ jobs:
           if replacements != 1:
               raise SystemExit("Expected exactly one src.__version__ assignment")
 
+          # Re-locking may need metadata beyond the current Python's cache.
           subprocess.run(
-              ["uv", "version", releaseVersion, "--offline", "--no-sync"],
+              ["uv", "version", releaseVersion, "--no-sync"],
               check=True,
           )
           sourcePath.write_text(source, encoding="utf-8", newline="\r\n")
