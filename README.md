@@ -65,5 +65,5 @@ uv sync --locked
 ---
 
 <p align="right">
-  <sub>许可证 · <a href="LICENSE" title="GNU Affero General Public License v3.0（仅第 3 版）">AGPL-3.0-only</a></sub>
+  <sub>许可证 · <a href="LICENSE" title="GNU Affero General Public License v3.0（仅第 3 版）">AGPL-3.0-only</a> &nbsp;·&nbsp; 论坛 <a href="https://linux.do/" title="LINUX DO 社区">LINUX DO</a></sub>
 </p>
