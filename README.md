@@ -1,6 +1,6 @@
 # WPS MCP
 
-**让 AI 直接操作你正在使用的 WPS。**
+**🪄 让 AI 接管 WPS，自动处理文档、表格、PPT**
 
 <https://github.com/user-attachments/assets/59574cdb-c623-48a9-850d-c4488c5acacc>
 
@@ -65,5 +65,5 @@ uv sync --locked
 ---
 
 <p align="right">
-  <sub>许可证 · <a href="LICENSE" title="GNU Affero General Public License v3.0（仅第 3 版）">AGPL-3.0-only</a> &nbsp;·&nbsp; 论坛 <a href="https://linux.do/" title="LINUX DO 社区">LINUX DO</a></sub>
+  <sub>许可证 · <a href="LICENSE" title="GNU Affero General Public License v3.0（仅第 3 版）">AGPL-3.0-only</a> &nbsp;·&nbsp; 论坛 <a href="https://linux.do/t/topic/3064793" title="LINUX DO 社区">LINUX DO</a></sub>
 </p>
