@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from src.errors import WpsError
 from src.models import DocumentInput
 from src.native.context import CALL_DOCUMENT
-from src.native.session import WpsSession
+from src.native.windows import ComSession
 from src.writer import merge
 
 
@@ -20,7 +20,7 @@ class MergeHarness:
     document: Mock
     source: Mock
     application: Mock
-    session: WpsSession
+    session: ComSession
     previous_window: Mock
     documents: list[Mock]
 
@@ -66,7 +66,7 @@ def native(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MergeHarness:
     )
     document.Windows.Count = 1
     document.Windows.Item.return_value = target_window
-    session = WpsSession("writer")
+    session = ComSession("writer")
     monkeypatch.setattr(
         session, "get_application", lambda allow_launch=False: application
     )
@@ -566,3 +566,102 @@ def test_execute_rejects_non_csv_sources(
     with pytest.raises(ValueError, match="only local"):
         merge.execute_merge(merge.MergeExecuteInput())
     native.document.MailMerge.Execute.assert_not_called()
+
+
+def test_odbc_text_driver_resolves_default_directory(
+    native: MergeHarness,
+) -> None:
+    path = Path(native.source.Name)
+    native.source.Name = ""
+    native.source.ConnectString = (
+        "DRIVER={Microsoft Text Driver (*.txt; *.csv)};\t\t"
+        f"DefaultDir={path.parent};UID=Admin;PWD=private;Extensions=txt,csv,tab"
+    )
+    native.source.QueryString = "SELECT * FROM `records`"
+    details = merge.source_details(native.source)
+    assert details["file_path"] == str(path)
+    assert details["record_count"] == 2
+    assert "private" not in str(details)
+    assert "DRIVER" not in str(details)
+
+
+@pytest.mark.parametrize("property_name", ["DefaultDir", "Data Source"])
+def test_braced_source_preserves_semicolons_and_escaped_closing_brace(
+    tmp_path: Path, property_name: str
+) -> None:
+    directory = tmp_path / "source;with}brace"
+    directory.mkdir()
+    path = directory / "records.csv"
+    path.touch()
+    escaped = str(directory).replace("}", "}}")
+    source = SimpleNamespace(
+        Name="",
+        ConnectString=(
+            "DRIVER={Text;Driver}}Version};"
+            f"{property_name}={{{escaped}}};PWD={{password;with}}}}brace}};"
+        ),
+        QueryString="SELECT * FROM `records`",
+    )
+    assert merge.source_path(source) == path
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [
+        "DRIVER={Text;Driver;DefaultDir={directory};",
+        "DRIVER={Text}garbage;DefaultDir={directory};",
+        "DefaultDir={{directory};",
+        "DefaultDir={directory};DEFAULTDIR={directory};",
+        "DefaultDir={directory};Data Source={directory};",
+        "DefaultDir={https://example.com/data};",
+        r"DefaultDir={\\server\share};",
+        "DefaultDir={relative};",
+        "DRIVER={Text; DefaultDir={directory}};",
+        "PWD={secret;DefaultDir={directory}};",
+        " =unused;DefaultDir={directory};",
+    ],
+)
+def test_odbc_connection_rejects_injection_and_ambiguous_paths(
+    native: MergeHarness, tmp_path: Path, connection: str
+) -> None:
+    native.source.Name = ""
+    native.source.ConnectString = connection.replace(
+        "{directory}", str(tmp_path)
+    )
+    native.source.QueryString = "SELECT * FROM `records`"
+    with pytest.raises(ValueError) as caught:
+        merge.execute_merge(merge.MergeExecuteInput())
+    assert "secret" not in str(caught.value)
+    assert "DRIVER=" not in str(caught.value)
+    native.document.MailMerge.Execute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT Name FROM `records`",
+        "SELECT * FROM `records`; DELETE FROM records",
+        "SELECT * FROM `records` WHERE 1=1",
+        "SELECT * FROM `../records`",
+        r"SELECT * FROM `..\records`",
+        "SELECT * FROM `https://example.com/records`",
+        "SELECT * FROM `records` -- comment",
+    ],
+)
+def test_odbc_query_keeps_single_local_csv_table_boundary(
+    native: MergeHarness, tmp_path: Path, query: str
+) -> None:
+    native.source.Name = ""
+    native.source.ConnectString = f"DRIVER={{Text}};DefaultDir={tmp_path};"
+    native.source.QueryString = query
+    with pytest.raises(ValueError):
+        merge.execute_merge(merge.MergeExecuteInput())
+    native.document.MailMerge.Execute.assert_not_called()
+
+
+def test_odbc_default_directory_cannot_be_a_file(native: MergeHarness) -> None:
+    native.source.ConnectString = f"DefaultDir={native.source.Name};"
+    native.source.Name = ""
+    native.source.QueryString = "SELECT * FROM `records`"
+    with pytest.raises(ValueError, match="local source directory"):
+        merge.source_path(native.source)

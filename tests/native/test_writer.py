@@ -10,17 +10,13 @@ from tests.native.client import NativeClient, native_client
 async def builtin_style_names(
     client: NativeClient, identity: str
 ) -> tuple[str, str]:
-    """Read localized Normal and Heading 1 names on the owning STA."""
-    assert client.server.runtime is not None
-    session = client.server.runtime.sessions["writer"]
-
-    def read_names() -> list[str]:
-        document = session.get_document(identity)
-        return [
-            str(document.Styles.Item(index).NameLocal) for index in (-1, -2)
-        ]
-
-    names = await anyio.to_thread.run_sync(session.execute, read_names)
+    """Read localized built-in names through the public tool contract."""
+    names = []
+    for identifier in (-1, -2):
+        result = await client.call(
+            "wps_writer_styles", "read", document=identity, name=identifier
+        )
+        names.append(str(result["name"]))
     return names[0], names[1]
 
 

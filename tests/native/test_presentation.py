@@ -6,6 +6,7 @@ import anyio
 import pytest
 from PIL import Image
 
+from src.common.colors import hex_to_int
 from src.models import JsonObject
 from tests.native.client import NativeClient, native_client
 
@@ -13,35 +14,49 @@ from tests.native.client import NativeClient, native_client
 async def read_shape_styles(
     client: NativeClient, identity: str, names: list[str]
 ) -> list[JsonObject]:
-    """Read native values on the WPP STA and return only plain data."""
-    assert client.server.runtime is not None
-    session = client.server.runtime.sessions["wpp"]
-
-    def read_shapes() -> list[JsonObject]:
-        shapes = session.get_document(identity).Slides(1).Shapes
-        values: list[JsonObject] = []
-        for name in names:
-            shape = shapes(name)
-            text = shape.TextFrame.TextRange
-            font = text.Font
-            values.append(
-                {
-                    "name": str(shape.Name),
-                    "fill_visible": bool(shape.Fill.Visible),
-                    "fill_color": int(shape.Fill.ForeColor.RGB),
-                    "line_visible": bool(shape.Line.Visible),
-                    "line_color": int(shape.Line.ForeColor.RGB),
-                    "line_weight": float(shape.Line.Weight),
-                    "text": str(text.Text),
-                    "font_size": float(font.Size),
-                    "font_bold": bool(font.Bold),
-                    "font_italic": bool(font.Italic),
-                    "font_color": int(font.Color.RGB),
-                }
-            )
-        return values
-
-    return await anyio.to_thread.run_sync(session.execute, read_shapes)
+    """Read every shape and text run through the public tool contract."""
+    values: list[JsonObject] = []
+    for name in names:
+        shape = await client.call(
+            "wps_ppt_shapes",
+            "get",
+            document=identity,
+            slide_index=1,
+            shape_name=name,
+        )
+        text = await client.call(
+            "wps_ppt_text",
+            "get",
+            document=identity,
+            slide_index=1,
+            shape_name_or_index=name,
+        )
+        fill, line = shape["fill"], shape["line"]
+        assert fill is not None and line is not None
+        runs = text["runs"]
+        assert runs
+        font = runs[0]
+        assert all(
+            run[field] == font[field]
+            for run in runs
+            for field in ("font_size", "bold", "italic", "color_hex")
+        )
+        values.append(
+            {
+                "name": str(shape["name"]),
+                "fill_visible": bool(fill["visible"]),
+                "fill_color": hex_to_int(fill["color_hex"]),
+                "line_visible": bool(line["visible"]),
+                "line_color": hex_to_int(line["color_hex"]),
+                "line_weight": float(line["weight"]),
+                "text": str(text["text"]),
+                "font_size": float(font["font_size"]),
+                "font_bold": bool(font["bold"]),
+                "font_italic": bool(font["italic"]),
+                "font_color": hex_to_int(font["color_hex"]),
+            }
+        )
+    return values
 
 
 def test_native_ppt_grouped_styles_save_reopen_and_shape_export(

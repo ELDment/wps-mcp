@@ -2,15 +2,17 @@
 
 import logging
 import re
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Literal
 
 from pydantic import Field, model_validator
-from pywintypes import com_error
 
 from src.common.colors import hex_to_int
+from src.errors import NativeError, native_errors
 from src.models import DocumentInput, InputModel, JsonObject, NativeObject
+from src.native.rpc import RpcObject
 from src.native.runtime import get_session
 from src.native.state import temporary_attributes
 from src.presentation.navigation import goto_slide
@@ -234,7 +236,7 @@ def chart_workbook(
     data = chart.ChartData
     try:
         workbook = data.Workbook
-    except (com_error, AttributeError):
+    except native_errors() + (AttributeError,):
         workbook = None
     owned = own_existing or workbook is None
     if workbook is None:
@@ -363,6 +365,23 @@ def _read_chart_series(
     return categories, series_list
 
 
+def _read_rpc_chart(chart: RpcObject) -> tuple[list[str], list[JsonObject]]:
+    """Activate Linux chart data once and wait only for readable series.
+
+    Activation may show the data editor. Its workbook cannot be reliably
+    obtained through Linux RPC, so WPS retains ownership of that editor.
+    """
+    chart.ChartData.Activate()
+    deadline = time.monotonic() + 5.0
+    while True:
+        try:
+            return _read_chart_series(chart)
+        except NativeError as error:
+            if error.hresult != -2147483639 or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
 @tool(
     "wps_ppt_charts",
     component="wpp",
@@ -388,8 +407,11 @@ def add_chart(params: AddChartInput) -> JsonObject:
         -1, type_int, params.left, params.top, params.width, params.height
     )
     chart = chart_shape.Chart
-    with chart_workbook(chart, own_existing=True):
-        pass
+    if isinstance(chart, RpcObject):
+        _read_rpc_chart(chart)
+    else:
+        with chart_workbook(chart, own_existing=True):
+            pass
     type_name = CHART_TYPE_NAMES.get(type_int, str(type_int))
     return {
         "success": True,
@@ -421,8 +443,14 @@ def set_chart_data(params: SetChartDataInput) -> JsonObject:
     Example series:
         [{"name": "Revenue", "values": [100, 200, 150, 300]}]
     """
-    shape = _get_chart_shape(params)
+    shape = _get_chart_shape(params, navigate=False)
     chart = shape.Chart
+    if isinstance(chart, RpcObject):
+        raise NotImplementedError(
+            "Linux WPS RPC cannot safely edit embedded chart workbooks; "
+            "chart data was not changed"
+        )
+    goto_slide(get_session("wpp").get_application(), params.slide_index)
     with chart_workbook(chart) as workbook:
         worksheet = workbook.Worksheets(1)
         _validate_chart_layout(
@@ -465,15 +493,19 @@ def set_chart_data(params: SetChartDataInput) -> JsonObject:
     operation="get_data",
 )
 def get_chart_data(params: GetChartDataInput) -> JsonObject:
-    """Read chart data from the underlying WPS Spreadsheets workbook.
+    """Read categories and plotted series from a native chart.
 
     Returns the category labels and all series (name + values). Identify
-    the chart by shape name or 1-based shape index.
+    the chart by shape name or 1-based shape index. Linux may open the
+    chart data editor while initializing readable series.
     """
     shape = _get_chart_shape(params, navigate=False)
     chart = shape.Chart
-    with chart_workbook(chart):
-        categories, series_list = _read_chart_series(chart)
+    if isinstance(chart, RpcObject):
+        categories, series_list = _read_rpc_chart(chart)
+    else:
+        with chart_workbook(chart):
+            categories, series_list = _read_chart_series(chart)
     return {
         "success": True,
         "shape_name": shape.Name,
@@ -572,7 +604,7 @@ def format_chart(params: FormatChartInput) -> JsonObject:
                 try:
                     value = getattr(font, name)
                     saved_font[name] = value.RGB if name == "Color" else value
-                except (com_error, AttributeError):
+                except native_errors() + (AttributeError,):
                     warnings.append(f"Cannot preserve chart title font {name}")
             with temporary_attributes(chart, HasTitle=False):
                 pass
@@ -648,7 +680,7 @@ def format_chart_axis(params: FormatChartAxisInput) -> JsonObject:
     axis_group = AXIS_GROUP_SECONDARY if is_secondary else AXIS_GROUP_PRIMARY
     try:
         ax = chart.Axes(axis_type, axis_group)
-    except com_error as exc:
+    except native_errors() as exc:
         raise ValueError(
             f"Axis {params.axis!r} is unavailable for this chart type"
         ) from exc

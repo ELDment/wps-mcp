@@ -396,12 +396,127 @@ def test_reference_targets_keep_native_order_and_bookmark_names(
     )
     assert bookmarks["targets"][0]["reference_item"] == "BookmarkB"
     document.GetCrossReferenceItems.return_value = None
+    document.Endnotes.Count = 0
     assert (
         references.list_reference_targets(
             references.ReferenceTargetsInput(reference_type="endnote")
         )["targets"]
         == []
     )
+
+
+def test_linux_heading_targets_follow_builtin_style_order(
+    document: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(references, "sys", SimpleNamespace(platform="linux"))
+    document.GetCrossReferenceItems.return_value = None
+    document.Styles.Item.side_effect = lambda identifier: SimpleNamespace(
+        NameLocal=f"标题 {-identifier - 1}"
+    )
+    paragraphs = [
+        SimpleNamespace(
+            OutlineLevel=3,
+            Range=SimpleNamespace(
+                Text="Third first\r", Style=SimpleNamespace(NameLocal="标题 3")
+            ),
+        ),
+        SimpleNamespace(
+            OutlineLevel=2,
+            Range=SimpleNamespace(
+                Text="Custom outline\r",
+                Style=SimpleNamespace(NameLocal="正文"),
+            ),
+        ),
+        SimpleNamespace(
+            OutlineLevel=1,
+            Range=SimpleNamespace(
+                Text="First last\r", Style=SimpleNamespace(NameLocal="标题 1")
+            ),
+        ),
+    ]
+    document.Paragraphs.Count = len(paragraphs)
+    document.Paragraphs.Item.side_effect = lambda index: paragraphs[index - 1]
+    assert references.list_reference_targets(
+        references.ReferenceTargetsInput(reference_type="heading")
+    )["targets"] == [
+        {"reference_item": 1, "text": "Third first"},
+        {"reference_item": 2, "text": "First last"},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reference_type", "collection_name"),
+    [
+        ("bookmark", "Bookmarks"),
+        ("footnote", "Footnotes"),
+        ("endnote", "Endnotes"),
+    ],
+)
+def test_linux_reference_targets_use_native_collection_order(
+    document: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    reference_type: str,
+    collection_name: str,
+) -> None:
+    monkeypatch.setattr(references, "sys", SimpleNamespace(platform="linux"))
+    document.GetCrossReferenceItems.return_value = None
+    items = [
+        SimpleNamespace(
+            Name="Second", Range=SimpleNamespace(Text="  note 2\r")
+        ),
+        SimpleNamespace(Name="First", Range=SimpleNamespace(Text="note 1\r")),
+    ]
+    collection = getattr(document, collection_name)
+    collection.Count = 2
+    collection.Item.side_effect = lambda index: items[index - 1]
+    params = references.ReferenceTargetsInput.model_validate(
+        {"reference_type": reference_type}
+    )
+    targets = references.list_reference_targets(params)["targets"]
+    assert targets == (
+        [
+            {"reference_item": "Second", "text": "Second"},
+            {"reference_item": "First", "text": "First"},
+        ]
+        if reference_type == "bookmark"
+        else [
+            {"reference_item": 1, "text": "  note 2"},
+            {"reference_item": 2, "text": "note 1"},
+        ]
+    )
+
+
+def test_windows_empty_native_targets_do_not_guess_collection_order(
+    document: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(references, "sys", SimpleNamespace(platform="win32"))
+    document.GetCrossReferenceItems.return_value = None
+    assert references.reference_targets(document, "heading") == []
+    document.Paragraphs.Item.assert_not_called()
+
+
+def test_linux_native_target_array_takes_precedence_over_collections(
+    document: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(references, "sys", SimpleNamespace(platform="linux"))
+    document.GetCrossReferenceItems.return_value = ("Native order",)
+    assert references.reference_targets(document, "heading") == [
+        "Native order"
+    ]
+    document.Paragraphs.Item.assert_not_called()
+
+
+def test_linux_target_lookup_does_not_hide_native_errors(
+    document: Mock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(references, "sys", SimpleNamespace(platform="linux"))
+    document.GetCrossReferenceItems.side_effect = RuntimeError(
+        "Native failure"
+    )
+    with pytest.raises(RuntimeError, match="Native failure"):
+        references.reference_targets(document, "heading")
+    document.GetCrossReferenceItems.assert_called_once_with(1)
+    document.Paragraphs.Item.assert_not_called()
 
 
 @pytest.mark.parametrize("values", ["a single string", (None,), (1,)])

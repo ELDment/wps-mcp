@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from src.models import Component, DocumentInput, InputModel, JsonObject
 from src.native.context import CALL_DOCUMENT
 from src.native.runtime import Runtime
-from src.native.session import WpsSession
+from src.native.windows import ComSession
 from src.protocol.adapters import make_adapter
 from src.protocol.definitions import DEFINITIONS, ToolDefinition
 from src.protocol.server import build_server, lifespan
@@ -78,8 +78,7 @@ def test_lifespan_restarts_without_reusing_closed_sessions() -> None:
             assert result.structured_content is not None
             assert "components" in result.structured_content
             assert all(
-                session.worker.thread is None
-                for session in first.sessions.values()
+                not session.started for session in first.sessions.values()
             )
         assert server.runtime is None
         async with lifespan(server):
@@ -123,7 +122,7 @@ def test_invalid_calls_fail_before_native_launch() -> None:
                     await server.call_tool("wps_components", arguments)
             assert server.runtime is not None
             assert all(
-                session.worker.thread is None
+                not session.started
                 for session in server.runtime.sessions.values()
             )
 
@@ -164,7 +163,7 @@ def test_invalid_wpp_visibility_fails_before_native_launch(
                 )
             assert server.runtime is not None
             assert all(
-                session.worker.thread is None
+                not session.started
                 for session in server.runtime.sessions.values()
             )
 
@@ -196,7 +195,7 @@ def test_connect_defaults_to_visible_application(
 
     async def scenario() -> None:
         with Runtime(
-            lambda kind: WpsSession(
+            lambda kind: ComSession(
                 kind, connector=connector, scope=nullcontext
             )
         ) as runtime:

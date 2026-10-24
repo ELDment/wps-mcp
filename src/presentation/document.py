@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Literal, Self
@@ -603,10 +604,21 @@ def list_templates(params: ListTemplatesInput) -> JsonObject:
     if directory is None:
         candidates = [os.environ.get("WPS_TEMPLATES_DIR")]
         app_data = os.environ.get("APPDATA")
-        if app_data:
+        if app_data and sys.platform == "win32":
             candidates.append(
                 str(Path(app_data) / "kingsoft" / "office6" / "templates")
             )
+        if sys.platform == "linux":
+            data_home = os.environ.get("XDG_DATA_HOME")
+            data_root = (
+                Path(data_home)
+                if data_home and Path(data_home).is_absolute()
+                else Path.home() / ".local" / "share"
+            )
+            candidates.append(
+                str(data_root / "Kingsoft" / "office6" / "templates")
+            )
+            candidates.append("/opt/kingsoft/wps-office/templates")
         directory = next(
             (
                 candidate

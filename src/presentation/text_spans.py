@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from src.common.text import normalize_text
@@ -11,6 +12,24 @@ from src.presentation.text_models import RunSpec, SpanSpec
 def utf16_length(value: str) -> int:
     """Count UTF-16 units, preserving existing unpaired surrogates."""
     return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+
+
+def find_spans(
+    text: str, needle: str, *, match_case: bool, whole_words: bool
+) -> list[tuple[int, int]]:
+    """Find literal Unicode matches and return one-based UTF-16 spans."""
+    if not needle:
+        raise ValueError("Search text must not be empty")
+    pattern = re.escape(needle)
+    if whole_words:
+        pattern = rf"(?<!\w){pattern}(?!\w)"
+    return [
+        (
+            utf16_length(text[: match.start()]) + 1,
+            utf16_length(match.group()),
+        )
+        for match in re.finditer(pattern, text, 0 if match_case else re.I)
+    ]
 
 
 def python_span(value: str, start: int, length: int) -> tuple[int, int]:

@@ -4,6 +4,7 @@ from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
+from src.errors import NativeError
 from src.models import JsonObject, NativeObject
 from src.protocol.definitions import (
     READ_ANNOTATIONS,
@@ -119,16 +120,19 @@ class ReadValidationInput(RangeInput):
 
 
 def validation_type(target: NativeObject) -> int | None:
-    """Confirm missing validation independently of generic COM errors."""
+    """Confirm missing validation independently of generic native errors."""
     try:
         kind = target.Validation.Type
     except Exception as error:
         info = getattr(error, "excepinfo", None)
         if not (
-            getattr(error, "hresult", None) == -2147352567
-            and isinstance(info, tuple)
-            and len(info) > 5
-            and info[5] in {-2146827284, -2147024809}
+            (isinstance(error, NativeError) and error.hresult == -2147483645)
+            or (
+                getattr(error, "hresult", None) == -2147352567
+                and isinstance(info, tuple)
+                and len(info) > 5
+                and info[5] in {-2146827284, -2147024809}
+            )
         ):
             raise
         try:
@@ -136,6 +140,9 @@ def validation_type(target: NativeObject) -> int | None:
         except Exception as lookup_error:
             lookup_info = getattr(lookup_error, "excepinfo", None)
             if (
+                isinstance(lookup_error, NativeError)
+                and lookup_error.hresult == -2146827284
+            ) or (
                 getattr(lookup_error, "hresult", None) == -2147352567
                 and isinstance(lookup_info, tuple)
                 and len(lookup_info) > 5

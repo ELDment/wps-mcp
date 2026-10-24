@@ -12,7 +12,7 @@ from pydantic import Field, TypeAdapter
 from src.models import Component, DocumentInput, InputModel, JsonObject
 from src.native.context import CALL_DOCUMENT
 from src.native.runtime import Runtime
-from src.native.session import WpsSession
+from src.native.windows import ComSession
 from src.protocol.adapters import make_adapter
 from src.protocol.catalog import register_tools
 from src.protocol.definitions import ToolDefinition
@@ -138,7 +138,7 @@ def test_group_can_return_both_data_and_an_image(
         assert isinstance(result, Image)
         assert result.data == b"png-data"
 
-    with Runtime(lambda name: WpsSession(name, scope=nullcontext)):
+    with Runtime(lambda name: ComSession(name, scope=nullcontext)):
         anyio.run(scenario)
 
 

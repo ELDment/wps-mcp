@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-import logging
-import struct
-from collections.abc import Iterator
-from contextlib import ExitStack, closing, contextmanager
-from io import BytesIO
+from contextlib import ExitStack, closing
 from pathlib import Path, PureWindowsPath
 from tempfile import TemporaryDirectory
 from typing import Literal, Self
 
 import pypdfium2 as pdfium
-import win32clipboard
 from PIL import Image
 from pydantic import Field, model_validator
 
 from src.common.files import publish_file
 from src.common.rendering import RENDER_LOCK
 from src.models import DocumentInput, JsonObject, NativeObject
+from src.native.clipboard import copy_images, ensure_clipboard_available
 from src.native.runtime import get_runtime, get_session
 from src.presentation.constants import (
     MSO_TRUE,
@@ -113,9 +109,6 @@ def export_shape(params: ExportShapeInput) -> JsonObject:
         "shape_name": shape.Name,
         "file_path": str(target),
     }
-
-
-logger = logging.getLogger(__name__)
 
 
 class ExportPDFInput(DocumentInput):
@@ -252,27 +245,6 @@ def _export_slide_image(
         if height is not None and exported.height != height:
             raise RuntimeError("WPS did not honor the requested image height")
         exported.verify()
-
-
-@contextmanager
-def _clipboard() -> Iterator[None]:
-    """Pair clipboard access while preserving the primary failure."""
-    win32clipboard.OpenClipboard()
-    failed = False
-    try:
-        yield
-    except BaseException:
-        failed = True
-        raise
-    finally:
-        try:
-            win32clipboard.CloseClipboard()
-        except Exception:
-            if not failed:
-                raise
-            logger.exception(
-                "Could not close clipboard after an operation failed"
-            )
 
 
 @tool(
@@ -415,7 +387,8 @@ def export_images(params: ExportImagesInput) -> JsonObject:
     operation="clipboard",
 )
 def copy_to_clipboard(params: CopyToClipboardInput) -> JsonObject:
-    """Copy a bitmap or a file drop list for multiple images."""
+    """Copy one image or a desktop file list for multiple images."""
+    ensure_clipboard_available()
     session = get_session("wpp")
     presentation = session.get_document(params.document)
     indices = params.slide_indices
@@ -443,29 +416,7 @@ def copy_to_clipboard(params: CopyToClipboardInput) -> JsonObject:
                 params.width,
                 params.height,
             )
-        if len(paths) == 1:
-            with (
-                Image.open(paths[0]) as source,
-                source.convert("RGBA") as rgba,
-            ):
-                with (
-                    Image.new("RGB", rgba.size, "white") as canvas,
-                    rgba.getchannel("A") as alpha,
-                ):
-                    canvas.paste(rgba, mask=alpha)
-                    with BytesIO() as buffer:
-                        canvas.save(buffer, format="BMP")
-                        payload = buffer.getvalue()[14:]
-            clipboard_format, method = 8, "CF_DIB"
-        else:
-            payload = struct.pack("<IiiII", 20, 0, 0, 0, 1)
-            payload += (
-                "\0".join(str(path) for path in paths) + "\0\0"
-            ).encode("utf-16-le")
-            clipboard_format, method = 15, "CF_HDROP"
-        with _clipboard():
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardData(clipboard_format, payload)
+        method = copy_images(paths)
         if len(paths) > 1:
             get_runtime().resources.enter_context(resources.pop_all())
     return {

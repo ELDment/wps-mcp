@@ -1047,6 +1047,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pywpsrpc"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/be/261ad7f6ca52c1b1f439b916e0e215add7ec9990b3a5349f91b374361c0f/pywpsrpc-2.4.0.tar.gz", hash = "sha256:f2af3b0c4d72f37592be16b3ced41b5bae366cb0fc4e23165d7ffb3457d80b7c", size = 10155238, upload-time = "2026-06-20T16:27:48.906Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/39/9448d386d4e919156d9b79bafeb27b564094c7d8906d43301be0c01678c2/pywpsrpc-2.4.0-cp311-cp311-manylinux_2_5_x86_64.whl", hash = "sha256:88c1a09c1a6a3274735b389982c50486b9b610ccb8dc6cb262c78bbb7e13d94a", size = 7878585, upload-time = "2026-06-20T16:28:41.988Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/74/612f60013e9e5b3625968cc219949107c67b51b09e7cd2ed53d0f0e5e1d7/pywpsrpc-2.4.0-cp312-cp312-manylinux_2_5_x86_64.whl", hash = "sha256:4bb25edb4e33a1175701c71bbf0e8bf3a00f09e7cfbc85f0b7ccd9ebe24402e0", size = 7881706, upload-time = "2026-06-20T16:28:26.861Z" },
+    { url = "https://files.pythonhosted.org/packages/96/bf/3bb09265bfbb96a72a90627177be3a405e85fdc5edb0f407807035971b9d/pywpsrpc-2.4.0-cp313-cp313-manylinux_2_5_x86_64.whl", hash = "sha256:49bfbfcbbef59b7ec6c0c2aa36f96588a3d13a09c4d37c5acfdd50cc7758ed66", size = 7882128, upload-time = "2026-06-20T16:27:46.719Z" },
+    { url = "https://files.pythonhosted.org/packages/39/11/e78db17521f6257fa164a892e269fc43cf4f2be1bc6d625c4d299e404070/pywpsrpc-2.4.0-cp314-cp314-manylinux_2_5_x86_64.whl", hash = "sha256:0bfe103d7c8523d4b568f97990563ffaecb3f2b19d95470c2d926838e1296975", size = 7881363, upload-time = "2026-06-20T16:28:20.234Z" },
+]
+
+[[package]]
 name = "referencing"
 version = "0.37.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1318,6 +1330,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pypdfium2" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "pywpsrpc", marker = "python_full_version < '3.12' and platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
 [package.dev-dependencies]
@@ -1338,6 +1351,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0,<3.0.0" },
     { name = "pypdfium2", specifier = ">=4.30.0,<6.0.0" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
+    { name = "pywpsrpc", marker = "python_full_version == '3.11.*' and platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = "==2.4.0" },
 ]
 
 [package.metadata.requires-dev]

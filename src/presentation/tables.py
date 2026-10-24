@@ -1,4 +1,4 @@
-"""Table operations for WPS Presentation COM automation.
+"""Table operations for native WPS Presentation automation.
 
 Handles creating tables, setting cell text/formatting, merging cells,
 adding/deleting rows/columns, and applying table styles.
@@ -8,10 +8,10 @@ from operator import attrgetter
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
-from pywintypes import com_error
 
 from src.common.colors import hex_to_int, int_to_hex
 from src.common.text import font_size_warning, normalize_text
+from src.errors import native_errors
 from src.models import DocumentInput, JsonObject, NativeObject
 from src.native.runtime import get_session
 from src.presentation.constants import (
@@ -296,7 +296,7 @@ def _get_cell_format(cell: NativeObject) -> JsonObject:
             elif name == "vertical_alignment":
                 value = VERTICAL_ANCHOR_NAMES.get(value)
             result[name] = value
-        except (com_error, AttributeError):
+        except native_errors() + (AttributeError,):
             # WPS versions differ in the format properties they expose.
             result[name] = None
     return result

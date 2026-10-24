@@ -66,7 +66,9 @@ def build_server() -> WpsServer:
         "wps-mcp",
         lifespan=lifespan,
         instructions=(
-            "Control WPS Writer, ET and Presentation on Windows. "
+            "Control WPS Writer, ET and Presentation on Windows and Linux. "
+            "Linux uses MCP-managed WPS instances and requires CPython 3.11. "
+            "Existing Linux desktop windows are not adopted. "
             "Start with wps_components using operation=detect. "
             "All tools take a params object with a required "
             "operation discriminator. "

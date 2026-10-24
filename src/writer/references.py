@@ -1,6 +1,7 @@
 """Manage Writer contents, notes, and native cross-references."""
 
 import logging
+import sys
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
@@ -200,7 +201,11 @@ def reference_targets(
     """
     values = document.GetCrossReferenceItems(REFERENCE_TYPES[reference_type])
     if values is None:
-        return []
+        return (
+            _collection_reference_targets(document, reference_type)
+            if sys.platform == "linux"
+            else []
+        )
     if not isinstance(values, (tuple, list)) or any(
         not isinstance(item, str) for item in values
     ):
@@ -208,6 +213,45 @@ def reference_targets(
             "WPS returned an invalid cross-reference target array"
         )
     return list(values)
+
+
+def _collection_reference_targets(
+    document: NativeObject, reference_type: ReferenceType
+) -> list[str]:
+    """List targets when Linux WPS omits its cross-reference item array.
+
+    Native heading reference indices count built-in heading styles in
+    document order. An outline level on another style is not a heading
+    target. Note indices follow their respective native collections.
+    """
+    if reference_type == "heading":
+        headings = {
+            str(document.Styles.Item(identifier).NameLocal)
+            for identifier in range(-2, -11, -1)
+        }
+        paragraphs = document.Paragraphs
+        result = []
+        for index in range(1, int(paragraphs.Count) + 1):
+            paragraph = paragraphs.Item(index)
+            text_range = paragraph.Range
+            if str(text_range.Style.NameLocal) in headings:
+                result.append(str(text_range.Text).rstrip("\r"))
+        return result
+    name = {
+        "bookmark": "Bookmarks",
+        "footnote": "Footnotes",
+        "endnote": "Endnotes",
+    }[reference_type]
+    collection = getattr(document, name)
+    result = []
+    for index in range(1, int(collection.Count) + 1):
+        item = collection.Item(index)
+        result.append(
+            str(item.Name)
+            if reference_type == "bookmark"
+            else str(item.Range.Text).rstrip("\r")
+        )
+    return result
 
 
 def reference_details(field: NativeObject, index: int) -> JsonObject:

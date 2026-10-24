@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from src.common.dates import date_text
 from src.models import DocumentInput, JsonObject
 from src.native.runtime import get_session
 from src.presentation.constants import (
@@ -90,7 +91,7 @@ def list_comments(params: ListCommentsInput) -> JsonObject:
     for i in range(1, count + 1):
         comment = comments_col(i)
         try:
-            dt_str = str(comment.DateTime)
+            dt_str = date_text(comment.DateTime)
         except Exception:
             dt_str = None
         comments.append(

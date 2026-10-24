@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pypdfium2 as pdfium
@@ -12,6 +12,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from src.models import DocumentInput, NativeObject
+from src.native import clipboard
 from src.presentation import (
     animation,
     export,
@@ -336,15 +337,9 @@ def test_clipboard_temp_files_follow_runtime_lifespan(
             image.save(path, format=image_format)
 
     presentation.Slides.return_value.Export.side_effect = render
-    open_clipboard, close_clipboard, write_clipboard = Mock(), Mock(), Mock()
-    monkeypatch.setattr(export.win32clipboard, "OpenClipboard", open_clipboard)
-    monkeypatch.setattr(
-        export.win32clipboard, "CloseClipboard", close_clipboard
-    )
-    monkeypatch.setattr(export.win32clipboard, "EmptyClipboard", Mock())
-    monkeypatch.setattr(
-        export.win32clipboard, "SetClipboardData", write_clipboard
-    )
+    write_clipboard = Mock(return_value="text/uri-list")
+    monkeypatch.setattr(export, "ensure_clipboard_available", Mock())
+    monkeypatch.setattr(export, "copy_images", write_clipboard)
     with ExitStack() as resources:
         monkeypatch.setattr(
             export, "get_runtime", lambda: SimpleNamespace(resources=resources)
@@ -354,9 +349,10 @@ def test_clipboard_temp_files_follow_runtime_lifespan(
         )
         directory = Path(result["temp_dir"])
         assert len(list(directory.iterdir())) == 2
-        open_clipboard.assert_called_once()
-        close_clipboard.assert_called_once()
-        assert write_clipboard.call_args.args[0] == 15
+        assert write_clipboard.call_args.args == (
+            [directory / "Slide1.png", directory / "Slide2.png"],
+        )
+        assert result["method"] == "text/uri-list"
     assert not directory.exists()
 
 
@@ -499,18 +495,13 @@ def test_interactive_animation_reports_exact_sequence(
     sequences.Add.assert_not_called()
 
 
-def test_clipboard_close_failure_preserves_write_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(export.win32clipboard, "OpenClipboard", Mock())
-    monkeypatch.setattr(
-        export.win32clipboard,
-        "CloseClipboard",
-        Mock(side_effect=RuntimeError("close")),
-    )
+def test_clipboard_close_failure_preserves_write_failure() -> None:
+    native = Mock(spec=ModuleType)
+    native.OpenClipboard = Mock()
+    native.CloseClipboard = Mock(side_effect=RuntimeError("close"))
     failure = ValueError("write")
     with pytest.raises(ValueError) as caught:
-        with export._clipboard():
+        with clipboard._windows_clipboard(native):
             raise failure
     assert caught.value is failure
 

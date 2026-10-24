@@ -1,5 +1,6 @@
 """Exercise native ownership and cancellation without launching WPS."""
 
+import ntpath
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
@@ -17,11 +18,12 @@ from src.errors import (
     WpsError,
 )
 from src.models import Component
+from src.native import selection
 from src.native.context import CALL_DOCUMENT
 from src.native.runtime import Runtime, get_runtime
 from src.native.selection import select_document
-from src.native.session import WpsSession
 from src.native.state import ensure_plain_result, temporary_attributes
+from src.native.windows import ComSession
 from src.native.worker import StaWorker, run_offloaded
 
 
@@ -200,7 +202,10 @@ def test_failed_scope_initialization_does_not_execute() -> None:
     assert worker.close()
 
 
-def test_document_selection_never_uses_foreground_heuristics() -> None:
+def test_document_selection_never_uses_foreground_heuristics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(selection, "path", ntpath)
     first = SimpleNamespace(Name="same.docx", FullName=r"C:\one\same.docx")
     second = SimpleNamespace(Name="same.docx", FullName=r"C:\two\same.docx")
     assert select_document([first, second], r"c:/ONE/same.docx") is first
@@ -235,12 +240,10 @@ def test_runtime_isolates_sessions_and_restores_context() -> None:
 def test_deferred_cleanup_waits_for_all_workers_despite_errors() -> None:
     events: list[str] = []
 
-    def factory(component: Component) -> WpsSession:
-        session = Mock(spec=WpsSession)
+    def factory(component: Component) -> ComSession:
+        session = Mock(spec=ComSession)
         session.worker = Mock()
-        session.worker.thread.join.side_effect = lambda: events.append(
-            component
-        )
+        session.wait.side_effect = lambda: events.append(component)
         session.close.side_effect = [
             False,
             WpsError("cleanup") if component == "writer" else True,
@@ -260,7 +263,7 @@ def test_session_context_and_native_result_boundary() -> None:
     document = SimpleNamespace(Name="test", FullName="test")
     collection = SimpleNamespace(Count=1, Item=lambda index: document)
     application = SimpleNamespace(Name="Fake WPS", Documents=collection)
-    session = WpsSession(
+    session = ComSession(
         "writer",
         connector=lambda prog_id, launch: application,
         scope=nullcontext,
@@ -286,7 +289,7 @@ def test_session_visibility(
 ) -> None:
     application = SimpleNamespace(Name="Fake WPS", Visible=initial_visible)
     connector = Mock(return_value=application)
-    session = WpsSession(component, connector=connector, scope=nullcontext)
+    session = ComSession(component, connector=connector, scope=nullcontext)
     try:
         if component == "wpp" and visible is False:
             with pytest.raises(ValueError, match="use visible=true"):
@@ -307,7 +310,7 @@ def test_wpp_rejects_hiding_an_existing_connection(
 ) -> None:
     application = SimpleNamespace(Name="Fake WPS", Visible=initial_visible)
     connector = Mock(return_value=application)
-    session = WpsSession("wpp", connector=connector, scope=nullcontext)
+    session = ComSession("wpp", connector=connector, scope=nullcontext)
     try:
         assert session.execute(lambda: session.connect().Visible) is (
             initial_visible

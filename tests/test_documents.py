@@ -318,12 +318,27 @@ def test_failed_wpp_close_restores_dirty_state(
 
 def test_successful_close_clears_target(session: SimpleNamespace) -> None:
     expected = session.target_name
+    session.get_documents = lambda: []
     result = service.close_document(
         models.CloseInput(component="writer", discard_changes=True)
     )
     assert result == {"closed": expected}
     assert session.target_name is None
     session.get_document().Close.assert_called_once_with(False)
+
+
+def test_silent_close_failure_restores_dirty_state(
+    session: SimpleNamespace,
+) -> None:
+    document = session.get_document()
+    session.get_documents = lambda: [document]
+    with pytest.raises(RuntimeError, match="did not close"):
+        service.close_document(
+            models.CloseInput(component="wpp", discard_changes=True)
+        )
+    assert document.Saved is False
+    assert session.target_name == document.FullName
+    document.Close.assert_called_once_with()
 
 
 def test_invalid_pdf_export_leaves_existing_file(

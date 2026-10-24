@@ -6,9 +6,9 @@ from unittest.mock import Mock, PropertyMock
 import pytest
 from pydantic import ValidationError
 
-from src.errors import WpsError
+from src.errors import NativeError, WpsError
 from src.native.context import CALL_DOCUMENT
-from src.native.session import WpsSession
+from src.native.windows import ComSession
 from src.spreadsheet import conditional, formulas, models, validation
 from src.spreadsheet import names as defined_names
 
@@ -40,7 +40,11 @@ def target(monkeypatch: pytest.MonkeyPatch) -> Mock:
     previous_sheet, previous_selection = Mock(), Mock()
     window = Mock(ActiveSheet=previous_sheet, Selection=previous_selection)
     previous_window = Mock()
-    application = Mock(ActiveWindow=previous_window, ActiveWorkbook=other)
+    application = Mock(
+        ActiveWindow=previous_window,
+        ActiveWorkbook=other,
+        Selection=previous_selection,
+    )
     document.Windows.Count = 1
     document.Windows.Item.return_value = window
 
@@ -66,7 +70,7 @@ def target(monkeypatch: pytest.MonkeyPatch) -> Mock:
     previous_selection.Select.side_effect = lambda: setattr(
         window, "Selection", previous_selection
     )
-    session = WpsSession("et")
+    session = ComSession("et")
     session.target_name = document.FullName
     monkeypatch.setattr(
         session, "get_application", lambda allow_launch=False: application
@@ -387,6 +391,18 @@ def conditional_replacement(target: Mock) -> tuple[Mock, Mock]:
     return old, new
 
 
+def test_conditional_linux_rgb_style_has_no_theme(
+    conditional_replacement: tuple[Mock, Mock],
+) -> None:
+    old, _ = conditional_replacement
+    type(old.Font).ThemeColor = PropertyMock(
+        side_effect=NativeError("not a theme color", -2147483645)
+    )
+    snapshot = conditional.condition_style(old)
+    assert snapshot["Font"]["Color"] == 0x123456
+    assert "ThemeColor" not in snapshot["Font"]
+
+
 def test_conditional_update_changes_one_rule(
     target: Mock, conditional_replacement: tuple[Mock, Mock]
 ) -> None:
@@ -687,12 +703,15 @@ class WpsMissingValidationError(Exception):
     excepinfo = (0, None, None, None, 0, -2147024809)
 
 
+@pytest.mark.parametrize(
+    "error",
+    [WpsMissingValidationError(), NativeError("No type", -2147483645)],
+)
 def test_wps_empty_validation_requires_independent_absence_check(
     target: Mock,
+    error: Exception,
 ) -> None:
-    type(target.Validation).Type = PropertyMock(
-        side_effect=WpsMissingValidationError()
-    )
+    type(target.Validation).Type = PropertyMock(side_effect=error)
     assert (
         validation.read_validation(
             validation.ReadValidationInput(address="A1")
@@ -702,13 +721,17 @@ def test_wps_empty_validation_requires_independent_absence_check(
     target.SpecialCells.assert_called_once_with(-4174)
 
 
+@pytest.mark.parametrize(
+    "error", [MissingValidationError(), NativeError("No cells", -2146827284)]
+)
 def test_missing_validation_accepts_native_no_special_cells(
     target: Mock,
+    error: Exception,
 ) -> None:
     type(target.Validation).Type = PropertyMock(
         side_effect=WpsMissingValidationError()
     )
-    target.SpecialCells.side_effect = MissingValidationError()
+    target.SpecialCells.side_effect = error
     assert (
         validation.read_validation(
             validation.ReadValidationInput(address="A1")
@@ -735,12 +758,15 @@ def test_missing_validation_ignores_special_cells_outside_target(
     target.Application.Intersect.assert_called_once_with(target, marked)
 
 
+@pytest.mark.parametrize(
+    "error",
+    [WpsMissingValidationError(), NativeError("No type", -2147483645)],
+)
 def test_invalid_native_type_with_existing_rules_does_not_replace_them(
     target: Mock,
+    error: Exception,
 ) -> None:
-    type(target.Validation).Type = PropertyMock(
-        side_effect=WpsMissingValidationError()
-    )
+    type(target.Validation).Type = PropertyMock(side_effect=error)
     target.SpecialCells.return_value = Mock()
     target.Application.Intersect.return_value = Mock()
     with pytest.raises(ValueError, match="cannot be read uniformly"):
@@ -755,7 +781,12 @@ def test_invalid_native_type_with_existing_rules_does_not_replace_them(
 
 
 @pytest.mark.parametrize(
-    "error", [RuntimeError("RPC failure"), WpsMissingValidationError()]
+    "error",
+    [
+        RuntimeError("RPC failure"),
+        WpsMissingValidationError(),
+        NativeError("Disconnected", -2147467259),
+    ],
 )
 def test_special_cells_failure_is_not_misreported_as_absence(
     target: Mock, error: Exception
