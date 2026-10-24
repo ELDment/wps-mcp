@@ -46,7 +46,7 @@
 
 ### 2. 配置 MCP 客户端
 
-推荐通过 **[PyPI](https://pypi.org/project/wps-mcp/)** 接入，`uvx` 会自动安装并启动服务。将对应平台的配置添加到客户端的 MCP 配置文件中。
+将下文配置添加到 MCP 配置文件中，推荐通过 **[PyPI](https://pypi.org/project/wps-mcp/)** 接入。
 
 <details open>
 <summary><strong>从PyPI接入（Windows）</strong></summary>
@@ -56,11 +56,13 @@
   "mcpServers": {
     "wps": {
       "command": "uvx",
-      "args": ["wps-mcp"]
+      "args": ["wps-mcp@latest"]
     }
   }
 }
 ```
+
+如需使用预发布版，将 `args` 改为 `["--prerelease", "allow", "wps-mcp@latest"]`。
 
 </details>
 
@@ -74,11 +76,13 @@ Linux 需要指定 **CPython 3.11**：
   "mcpServers": {
     "wps": {
       "command": "uvx",
-      "args": ["--python", "3.11", "wps-mcp"]
+      "args": ["--python", "3.11", "wps-mcp@latest"]
     }
   }
 }
 ```
+
+如需使用预发布版，将 `args` 改为 `["--python", "3.11", "--prerelease", "allow", "wps-mcp@latest"]`。
 
 </details>
 
