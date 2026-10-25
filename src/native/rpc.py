@@ -125,10 +125,15 @@ def decode_bstr(value: str) -> str:
     return value
 
 
-def unwrap(value: Any) -> Any:
+def unwrap(value: Any, *, variant: bool = True) -> Any:
     """Convert arguments without changing valid Unicode or literal values."""
     if isinstance(value, RpcObject):
         return value.native
+    if variant and type(value) is int and not -(2**31) <= value < 2**31:
+        # pywpsrpc stores Python ints in VT_I4, even on a 64-bit host.
+        if not -(2**53) <= value <= 2**53:
+            raise ValueError("RPC integers outside ±2**53 must use text")
+        return float(value)
     if isinstance(value, str):
         if "\0" in value or any(
             0xD800 <= ord(character) <= 0xDFFF for character in value
@@ -138,20 +143,24 @@ def unwrap(value: Any) -> Any:
             )
         return value
     if isinstance(value, (list, tuple)):
-        return [unwrap(item) for item in value]
+        return [unwrap(item, variant=variant) for item in value]
     if isinstance(value, dict):
-        return {key: unwrap(item) for key, item in value.items()}
+        return {
+            key: unwrap(item, variant=variant) for key, item in value.items()
+        }
     return value
 
 
-def _enum_argument(value: Any, annotation: str, api: Any) -> Any:
-    """Convert integer constants to the enum type required by SIP."""
-    value = unwrap(value)
+def _argument(value: Any, annotation: str, api: Any) -> Any:
+    """Convert VARIANT values and typed enum constants for SIP."""
+    qualified = annotation.strip("'\"").split("|", 1)[0]
+    value = unwrap(value, variant=qualified == "Any")
     if not isinstance(value, int):
         return value
-    qualified = annotation.strip("'\"").split("|", 1)[0]
     namespace, separator, name = qualified.partition(".")
-    if not separator or namespace not in {"wpsapi", "etapi", "wppapi"}:
+    if namespace == "ksoapi":
+        api = import_module("pywpsrpc.common").ksoapi
+    elif not separator or namespace not in {"wpsapi", "etapi", "wppapi"}:
         return value
     enum_type = getattr(api, name, None)
     if not isinstance(enum_type, type) or not issubclass(enum_type, int):
@@ -237,7 +246,7 @@ class RpcMethod:
         """Check every HRESULT without treating ordinary values as status."""
         signature = self._signature
         positional = [
-            _enum_argument(
+            _argument(
                 value,
                 signature.parameters[index].annotation
                 if index < len(signature.parameters)
@@ -263,7 +272,7 @@ class RpcMethod:
                 annotation = parameter.annotation
             else:
                 canonical, annotation = name, ""
-            keywords[canonical] = _enum_argument(value, annotation, self._api)
+            keywords[canonical] = _argument(value, annotation, self._api)
         for index, parameter in enumerate(signature.parameters):
             if (
                 parameter.name.lower() in LOCALE_PARAMETERS
@@ -352,6 +361,8 @@ class RpcObject:
                 return self._pivot_fields
             if name == "SeriesCollection" and self._is_type("Chart"):
                 return self._chart_series
+            if name == "Axes" and self._is_type("Chart"):
+                return self._chart_axes
             if name in INDEXED_PROPERTIES:
                 return method()
             return method
@@ -394,6 +405,14 @@ class RpcObject:
             _transfer_dispatch(raw, self._api.SeriesCollection), self._api
         )
         return collection if index is None else collection.Item(index)
+
+    def _chart_axes(self, *args: Any, **kwargs: Any) -> Any:
+        """Transfer the declared Axis or Axes interface returned by WPP."""
+        result = RpcMethod(self._native.Axes, self._api)(*args, **kwargs)
+        named = {name.casefold(): value for name, value in kwargs.items()}
+        axis_type = args[0] if args else named.get("type")
+        target = self._api.Axes if axis_type is None else self._api.Axis
+        return wrap(_transfer_dispatch(unwrap(result), target), self._api)
 
     def _read_matrix(self, name: str, error: NativeError) -> Any:
         """Read cells after the known pywpsrpc SAFEARRAY conversion failure."""

@@ -1,6 +1,7 @@
 """Exercise Linux binding differences without importing its native modules."""
 
 from collections.abc import Callable
+from ctypes import c_int32
 from datetime import date, datetime, time
 from types import SimpleNamespace
 from typing import Any
@@ -187,9 +188,17 @@ def test_arguments_unwrap_recursively_without_decoding_input_strings() -> None:
     assert unwrap((proxy, ("😀", 1))) == [native, ["😀", 1]]
 
 
-def test_method_arguments_and_properties_use_native_enum_types() -> None:
+@pytest.mark.parametrize("namespace", ["wppapi", "ksoapi"])
+def test_method_arguments_and_properties_use_native_enum_types(
+    monkeypatch: pytest.MonkeyPatch, namespace: str
+) -> None:
     enum_type = type("MsoTriState", (int,), {})
     api = SimpleNamespace(MsoTriState=enum_type)
+    if namespace == "ksoapi":
+        common = SimpleNamespace(ksoapi=api)
+        monkeypatch.setattr(rpc, "import_module", lambda name: common)
+        # The component's identically named enum is not the common enum.
+        api = SimpleNamespace(MsoTriState=type("MsoTriState", (int,), {}))
     calls = []
 
     def add(visible: int) -> tuple[int, None]:
@@ -197,7 +206,9 @@ def test_method_arguments_and_properties_use_native_enum_types() -> None:
         return 0, None
 
     add_method = RpcMethod(
-        method("Add(self, visible: wppapi.MsoTriState) -> (int, Any)", add),
+        method(
+            f"Add(self, visible: {namespace}.MsoTriState) -> (int, Any)", add
+        ),
         api,
     )
     add_method(True)
@@ -206,7 +217,7 @@ def test_method_arguments_and_properties_use_native_enum_types() -> None:
     assert calls == [-1, 0]
     native = SimpleNamespace()
     native.setVisible = method(
-        "setVisible(self, prop: wppapi.MsoTriState) -> Any",
+        f"setVisible(self, prop: {namespace}.MsoTriState) -> Any",
         lambda value: setattr(native, "Visible", value),
     )
     proxy = RpcObject(native, api)
@@ -302,11 +313,30 @@ def test_range_parent_alias_is_limited_to_declared_et_range_type() -> None:
         _ = RpcObject(SimpleNamespace(Worksheet=sheet), api).Parent
 
 
-def test_raw_property_setter_is_called_instead_of_python_assignment() -> None:
+@pytest.mark.parametrize(
+    "value",
+    [
+        "😀",
+        True,
+        False,
+        -(2**31),
+        2**31 - 1,
+        2**31,
+        3_000_000_000,
+        -3_000_000_000,
+        2**53,
+        -(2**53),
+    ],
+)
+def test_raw_property_setter_is_called_instead_of_python_assignment(
+    value: Any,
+) -> None:
     calls = []
 
     def assign(lcid: int, value: Any, /) -> int:
-        calls.append((lcid, value))
+        calls.append(
+            (lcid, c_int32(value).value if type(value) is int else value)
+        )
         return 0
 
     native = SimpleNamespace(
@@ -315,9 +345,38 @@ def test_raw_property_setter_is_called_instead_of_python_assignment() -> None:
         )
     )
     proxy = RpcObject(native, SimpleNamespace())
-    proxy.Value2 = "😀"
-    assert calls == [(0, "😀")]
+    proxy.Value2 = value
+    assert calls == [(0, value)]
     assert not hasattr(native, "Value2")
+
+
+def test_typed_integers_keep_native_type() -> None:
+    calls = []
+    native = RpcMethod(
+        method(
+            "Set(self, value: int) -> Any", lambda value: calls.append(value)
+        ),
+        SimpleNamespace(),
+    )
+    native(2**60)
+    assert calls == [2**60] and type(calls[0]) is int
+
+
+@pytest.mark.parametrize("value", [2**53 + 1, -(2**53) - 1, 10**400])
+def test_inexact_integers_are_rejected_before_any_write(value: int) -> None:
+    calls = []
+    native = SimpleNamespace(
+        setValue2=method(
+            "setValue2(self, prop: Any) -> Any",
+            lambda value: calls.append(value),
+        )
+    )
+    with pytest.raises(ValueError, match="use text"):
+        RpcObject(native, SimpleNamespace()).Value2 = value
+    proxy, writes = matrix_range(1, 2)
+    with pytest.raises(ValueError, match="use text"):
+        proxy.Value2 = [[1, value]]
+    assert calls == writes == []
 
 
 def test_failing_raw_property_setter_does_not_create_shadow_attribute() -> (
@@ -457,6 +516,15 @@ def test_formula_matrix_uses_scalar_formula_setters() -> None:
     assert writes == [(1, 1, "=SUM(A1,5)"), (1, 2, None)]
 
 
+def test_matrix_conversion_preserves_numbers_and_booleans() -> None:
+    proxy, writes = matrix_range(1, 4)
+    values = [3_000_000_000, -3_000_000_000, True, False]
+    proxy.Value2 = [values]
+    actual = [value for _, _, value in writes]
+    assert actual == values
+    assert [type(value) for value in actual] == [float, float, bool, bool]
+
+
 @pytest.mark.parametrize(
     ("owner", "name"),
     [
@@ -519,12 +587,28 @@ def test_defined_name_properties_supply_lcidin() -> None:
     assert calls == [0]
 
 
-def test_chart_series_uses_owned_collection_and_typed_item(
+@pytest.mark.parametrize(
+    ("name", "args", "kwargs", "interface"),
+    [
+        ("SeriesCollection", (1,), {}, "SeriesCollection"),
+        ("Axes", (2, 2), {}, "Axis"),
+        ("Axes", (), {"type": 2, "axisgroup": 2}, "Axis"),
+        ("Axes", (), {}, "Axes"),
+        ("Axes", (None,), {}, "Axes"),
+    ],
+)
+@pytest.mark.parametrize("status", [0, -2147467259])
+def test_chart_dispatch_uses_owned_typed_interface(
     monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    interface: str,
+    status: int,
 ) -> None:
     dispatch_type = type("IDispatch", (), {"__module__": "pywpsrpc.common"})
     chart_type = type("Chart", (), {})
-    collection_type = type("SeriesCollection", (), {})
+    collection_type = type(interface, (), {})
     field = SimpleNamespace(Name="Revenue")
     raw: Any = dispatch_type()
     events = []
@@ -536,6 +620,10 @@ def test_chart_series_uses_owned_collection_and_typed_item(
         typed.Item = method(
             "Item(self, Index: Any) -> (int, wppapi.Series|None)",
             lambda index: (0, field),
+        )
+        typed.setMinimumScale = method(
+            "setMinimumScale(self, prop: float) -> Any",
+            lambda value: setattr(typed, "MinimumScale", value),
         )
         events.append("cast")
         return typed
@@ -550,10 +638,38 @@ def test_chart_series_uses_owned_collection_and_typed_item(
     native: Any = chart_type()
     native.SeriesCollection = method(
         "SeriesCollection(self, Index: Any = None) -> (int, IDispatch|None)",
-        lambda: (0, raw),
+        lambda: (status, raw),
     )
-    api = SimpleNamespace(Chart=chart_type, SeriesCollection=collection_type)
-    assert RpcObject(native, api).SeriesCollection(1).Name == "Revenue"
+    calls = []
+
+    def axes(axis_type: Any = None, group: int = 1, lcid: int = 0) -> Any:
+        calls.append((axis_type, group, lcid))
+        return status, raw
+
+    native.Axes = method(
+        "Axes(self, Type: Any = None, AxisGroup: wppapi.XlAxisGroup = 1, "
+        "lcid: int = 0) -> (int, IDispatch|None)",
+        axes,
+    )
+    api = SimpleNamespace(
+        Chart=chart_type,
+        XlAxisGroup=type("XlAxisGroup", (int,), {}),
+        **{interface: collection_type},
+    )
+    operation = getattr(RpcObject(native, api), name)
+    if status:
+        with pytest.raises(NativeError) as caught:
+            operation(*args, **kwargs)
+        assert caught.value.hresult == status and events == []
+        return
+    result = operation(*args, **kwargs)
+    if interface == "Axis":
+        result.MinimumScale = 0.0
+        assert result.MinimumScale == 0.0
+        assert calls == [(2, 2, 0)]
+    else:
+        item = result if interface == "SeriesCollection" else result.Item(1)
+        assert item.Name == "Revenue"
     assert events == ["cast", "transfer"]
 
 
