@@ -69,21 +69,62 @@
 <details>
 <summary><strong>从PyPI接入（Linux）</strong></summary>
 
-Linux 需要指定 **CPython 3.11**：
+Linux 必须指定 **CPython 3.11**。
 
 ```json
 {
   "mcpServers": {
     "wps": {
       "command": "uvx",
-      "args": ["--python", "3.11", "wps-mcp@latest"]
+      "args": ["--no-config", "--python", "3.11", "wps-mcp@latest"]
     }
   }
 }
 ```
 
-如需使用预发布版，将 `args` 改为 `["--python", "3.11", "--prerelease", "allow", "wps-mcp@latest"]`。
+如需使用预发布版，将 `args` 改为 `["--no-config", "--python", "3.11", "--prerelease", "allow", "wps-mcp@latest"]`。
 
+<details>
+<summary>Run in a desktop session with DISPLAY and X authority</summary>
+
+遇到此错误时，需要将当前 Linux 桌面会话的环境变量转发给 WPS MCP。以下为 Claude Code 和 Codex 的配置示例。
+
+**Claude Code**
+
+```json
+{
+  "mcpServers": {
+    "wps": {
+      "command": "uvx",
+      "args": ["--no-config", "--python", "3.11", "wps-mcp@latest"],
+      "env": {
+        "DISPLAY": "${DISPLAY}",
+        "XAUTHORITY": "${XAUTHORITY:-}",
+        "WAYLAND_DISPLAY": "${WAYLAND_DISPLAY:-}",
+        "XDG_RUNTIME_DIR": "${XDG_RUNTIME_DIR:-}",
+        "DBUS_SESSION_BUS_ADDRESS": "${DBUS_SESSION_BUS_ADDRESS:-}"
+      }
+    }
+  }
+}
+```
+
+**Codex**
+
+```toml
+[mcp_servers.wps]
+command = "uvx"
+args = ["--no-config", "--python", "3.11", "wps-mcp@latest"]
+env_vars = [
+  "DISPLAY",
+  "XAUTHORITY",
+  "WAYLAND_DISPLAY",
+  "XDG_RUNTIME_DIR",
+  "DBUS_SESSION_BUS_ADDRESS"
+]
+```
+
+</details>
 </details>
 
 <details>
