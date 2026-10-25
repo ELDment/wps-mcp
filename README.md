@@ -15,7 +15,16 @@
   <strong>45</strong> 个工具组 &nbsp;·&nbsp; <strong>261</strong> 项操作 &nbsp;·&nbsp; 文字 / 表格 / 演示
 </p>
 
-<https://github.com/user-attachments/assets/59574cdb-c623-48a9-850d-c4488c5acacc>
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <video src="https://github.com/user-attachments/assets/e8442138-25c2-4f4f-b1a2-e12e2a6628ad" width="100%" controls></video>
+    </td>
+    <td width="50%" valign="top">
+      <video src="https://github.com/user-attachments/assets/b1d0b250-61f4-4a40-aded-55869e5aa8c5" width="100%" controls></video>
+    </td>
+  </tr>
+</table>
 
 ---
 
