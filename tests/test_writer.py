@@ -7,7 +7,15 @@ import pytest
 from pydantic import ValidationError
 
 from src.models import DocumentInput
-from src.writer import bookmarks, images, models, pages, statistics, tables
+from src.writer import (
+    bookmarks,
+    images,
+    models,
+    pages,
+    statistics,
+    styles,
+    tables,
+)
 from src.writer import text as text_tools
 
 
@@ -35,6 +43,37 @@ def test_inputs_preserve_whitespace_and_require_strict_positions() -> None:
         )
     with pytest.raises(ValidationError):
         models.CharacterFormat(font_size=float("nan"))
+
+
+@pytest.mark.parametrize("name", ["Normal", "正文", -1, -2])
+def test_style_read_accepts_names_and_builtin_identifiers(
+    name: str | int,
+) -> None:
+    params = styles.ReadStyleInput.model_validate({"name": name})
+    assert params.name == name
+    assert type(params.name) is type(name)
+
+
+@pytest.mark.parametrize("name", ["", 0, 1, True, -1.0, None])
+def test_style_read_rejects_invalid_or_coerced_identifiers(
+    name: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        styles.ReadStyleInput.model_validate({"name": name})
+
+
+@pytest.mark.parametrize(
+    "model",
+    [styles.StyleInput, styles.CreateStyleInput, styles.UpdateStyleInput],
+)
+def test_style_mutations_still_require_names(
+    model: type[styles.StyleInput],
+) -> None:
+    fields: dict[str, object] = {"name": -1}
+    if model is styles.UpdateStyleInput:
+        fields["character"] = {"bold": True}
+    with pytest.raises(ValidationError):
+        model.model_validate(fields)
 
 
 def test_nested_format_rejects_coercion() -> None:

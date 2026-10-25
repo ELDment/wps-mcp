@@ -90,7 +90,7 @@ def test_grouped_inputs_are_rejected_before_native_launch(
                 await server.call_tool(name, {"params": params})
             assert server.runtime is not None
             assert all(
-                session.worker.thread is None
+                not session.started
                 for session in server.runtime.sessions.values()
             )
 

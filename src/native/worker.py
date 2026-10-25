@@ -14,6 +14,7 @@ import anyio
 
 from src.errors import (
     DocumentNotFoundError,
+    NativeError,
     OperationTimeoutError,
     WpsError,
     WpsUnavailableError,
@@ -129,6 +130,13 @@ class StaWorker:
                         except BaseException as error:
                             # Recreate errors here: tracebacks and causes can
                             # retain COM proxies owned by this STA thread.
+                            if isinstance(error, NativeError):
+                                item.future.set_exception(
+                                    NativeError(str(error), error.hresult)
+                                )
+                                item.started.set()
+                                del item
+                                continue
                             if type(error) in (
                                 WpsError,
                                 WpsUnavailableError,

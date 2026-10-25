@@ -15,7 +15,7 @@ from pydantic import Field, create_model
 from src.errors import WpsError
 from src.models import Component, InputModel, JsonObject, ToolResult
 from src.native.context import CALL_DOCUMENT
-from src.native.runtime import get_session
+from src.native.runtime import get_runtime
 from src.native.worker import run_offloaded
 from src.protocol.definitions import ToolDefinition
 
@@ -86,7 +86,7 @@ def make_adapter(
             if component is None:
                 result = await run_offloaded(selected.function, params)
             else:
-                session = get_session(component)
+                session = get_runtime().sessions[component]
 
                 def execute_native() -> ToolResult:
                     return session.execute(selected.function, params)

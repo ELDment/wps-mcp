@@ -62,10 +62,15 @@ MODULES = (
 )
 
 
-def register_tools(server: MCPServer[Any]) -> None:
-    """Load built-in operations and publish deterministic tool groups."""
+def load_definitions() -> None:
+    """Import operation definitions without constructing an MCP server."""
     for module in MODULES:
         import_module(f"src.{module}")
+
+
+def register_tools(server: MCPServer[Any]) -> None:
+    """Load built-in operations and publish deterministic tool groups."""
+    load_definitions()
     groups: dict[str, list[ToolDefinition]] = {}
     for definition in DEFINITIONS.values():
         groups.setdefault(definition.name, []).append(definition)

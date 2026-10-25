@@ -4,6 +4,7 @@ from typing import Annotated, Self
 
 from pydantic import Field, model_validator
 
+from src.common.dates import date_text
 from src.models import DocumentInput, JsonObject, NativeObject
 from src.native.runtime import get_session
 from src.protocol.definitions import (
@@ -139,7 +140,7 @@ def list_revisions(params: ReviewListInput) -> JsonObject:
             {
                 "index": index,
                 "author": str(revision.Author),
-                "date": str(revision.Date),
+                "date": date_text(revision.Date),
                 "type": int(revision.Type),
                 **range_details(revision.Range),
             }
@@ -205,7 +206,7 @@ def comment_details(comment: NativeObject) -> JsonObject:
         "text": str(comment.Range.Text),
         "author": str(comment.Author),
         "initials": str(comment.Initial),
-        "date": str(comment.Date),
+        "date": date_text(comment.Date),
         "scope": range_details(comment.Scope),
     }
 

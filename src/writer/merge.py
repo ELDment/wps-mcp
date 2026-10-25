@@ -39,7 +39,8 @@ CONNECTED_STATES = {2, 4}
 
 CONNECTION_PROPERTY = re.compile(
     r"\s*([^=;]+?)\s*=\s*"
-    r"(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)'|([^;]*))"
+    r"(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)'|"
+    r"\{((?:[^}]|}})*)\}|([^;]*))"
     r"\s*(?:;|$)"
 )
 
@@ -134,8 +135,8 @@ def native_mail_merge(document: NativeObject) -> Iterator[NativeObject]:
 def source_path(source: NativeObject) -> Path:
     """Resolve a local CSV source from native connection metadata.
 
-    Parse unnamed OLE DB connections without evaluating SQL or persisting
-    state.
+    Parse unnamed OLE DB or ODBC connections without evaluating SQL or
+    persisting state.
     """
     name = str(source.Name)
     if name:
@@ -151,6 +152,10 @@ def source_path(source: NativeObject) -> Path:
                     "WPS returned an unsupported mail-merge connection string"
                 )
             key = match[1].strip().casefold()
+            if not key:
+                raise ValueError(
+                    "WPS returned an empty mail-merge connection property"
+                )
             if key in properties:
                 raise ValueError(
                     "WPS returned duplicate mail-merge connection properties"
@@ -158,12 +163,14 @@ def source_path(source: NativeObject) -> Path:
             value = next(
                 item for item in match.groups()[1:] if item is not None
             )
-            if match[4] is not None:
+            if match[5] is not None:
                 value = value.strip()
-                if value.startswith(("'", '"')):
+                if value.startswith(("'", '"', "{")):
                     raise ValueError(
                         "WPS returned an unterminated quoted connection value"
                     )
+            elif match[4] is not None:
+                value = value.replace("}}", "}")
             else:
                 value = (
                     value.replace('""', '"')
@@ -172,7 +179,17 @@ def source_path(source: NativeObject) -> Path:
                 )
             properties[key] = value
             position = match.end()
-        path = local_path(properties.get("data source", ""))
+        if "data source" in properties and "defaultdir" in properties:
+            raise ValueError(
+                "WPS returned ambiguous mail-merge source locations"
+            )
+        path = local_path(
+            properties.get("data source", properties.get("defaultdir", ""))
+        )
+        if "defaultdir" in properties and not path.is_dir():
+            raise ValueError(
+                "ODBC mail merge requires an existing local source directory"
+            )
         if path.is_dir():
             query = SOURCE_QUERY.fullmatch(str(source.QueryString))
             if query is None:

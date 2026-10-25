@@ -87,7 +87,7 @@ def formula_range(params: RangeInput, target: NativeObject) -> Iterator[None]:
                     "relative formulas"
                 )
             previous_sheet = window.ActiveSheet
-            previous_selection = window.Selection
+            previous_selection = application.Selection
             failed = False
             try:
                 target.Parent.Activate()

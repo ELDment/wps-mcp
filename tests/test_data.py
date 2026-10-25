@@ -5,9 +5,10 @@ from unittest.mock import Mock, PropertyMock
 
 import pytest
 from pydantic import ValidationError
-from pywintypes import com_error
 
+from src.errors import NativeError
 from src.models import JsonObject
+from src.native.rpc import RpcObject
 from src.presentation import charts, tables
 
 
@@ -83,7 +84,7 @@ def test_chart_workbook_borrowed_is_never_closed() -> None:
 def test_chart_workbook_owned_closes_on_error() -> None:
     data, workbook = Mock(), Mock()
     type(data).Workbook = PropertyMock(
-        side_effect=[com_error(-1, "inactive"), workbook]
+        side_effect=[NativeError("inactive", -1), workbook]
     )
     chart = SimpleNamespace(ChartData=data)
     with pytest.raises(ValueError, match="operation"):
@@ -96,7 +97,7 @@ def test_chart_workbook_owned_closes_on_error() -> None:
 def test_chart_workbook_cleanup_failure_is_reported() -> None:
     data, workbook = Mock(), Mock()
     type(data).Workbook = PropertyMock(
-        side_effect=[com_error(-1, "inactive"), workbook]
+        side_effect=[NativeError("inactive", -1), workbook]
     )
     workbook.Close.side_effect = RuntimeError("cleanup")
     with pytest.raises(RuntimeError, match="cleanup"):
@@ -109,7 +110,7 @@ def test_chart_workbook_cleanup_preserves_original_error(
 ) -> None:
     data, workbook = Mock(), Mock()
     type(data).Workbook = PropertyMock(
-        side_effect=[com_error(-1, "inactive"), workbook]
+        side_effect=[NativeError("inactive", -1), workbook]
     )
     workbook.Close.side_effect = RuntimeError("cleanup")
     with pytest.raises(ValueError, match="operation"):
@@ -204,6 +205,94 @@ def test_chart_stale_plotted_data_does_not_report_success(
     )
     with pytest.raises(RuntimeError, match="plotted data differs"):
         charts.set_chart_data(params)
+
+
+def test_rpc_chart_write_is_rejected_before_navigation_or_activation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native = SimpleNamespace(ChartData=Mock())
+    chart = RpcObject(native, SimpleNamespace())
+    resolve = Mock(return_value=SimpleNamespace(Chart=chart))
+    navigate = Mock()
+    monkeypatch.setattr(charts, "_get_chart_shape", resolve)
+    monkeypatch.setattr(charts, "goto_slide", navigate)
+    params = charts.SetChartDataInput(
+        slide_index=1,
+        shape_name_or_index="Chart 1",
+        categories=["A"],
+        series=[charts.ChartSeriesInput(name="Revenue", values=[1.0])],
+    )
+    with pytest.raises(NotImplementedError, match="data was not changed"):
+        charts.set_chart_data(params)
+    resolve.assert_called_once_with(params, navigate=False)
+    navigate.assert_not_called()
+    native.ChartData.Activate.assert_not_called()
+
+
+def test_rpc_chart_activation_is_not_repeated_while_series_initialize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chart = Mock(spec=RpcObject)
+    chart.ChartData = Mock()
+    expected = (["A"], [{"name": "Revenue", "values": [10.0]}])
+    reader = Mock(
+        side_effect=[NativeError("series not ready", -2147483639), expected]
+    )
+    monkeypatch.setattr(charts, "_read_chart_series", reader)
+    monkeypatch.setattr(charts.time, "sleep", Mock())
+    assert charts._read_rpc_chart(chart) == expected
+    chart.ChartData.Activate.assert_called_once_with()
+    assert reader.call_count == 2
+
+
+def test_rpc_chart_other_errors_are_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chart = Mock(spec=RpcObject)
+    chart.ChartData = Mock()
+    reader = Mock(side_effect=NativeError("disconnected", -2147483640))
+    monkeypatch.setattr(charts, "_read_chart_series", reader)
+    with pytest.raises(NativeError, match="disconnected"):
+        charts._read_rpc_chart(chart)
+    reader.assert_called_once_with(chart)
+
+
+def test_rpc_chart_read_does_not_request_an_unavailable_workbook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chart = Mock(spec=RpcObject)
+    shape = SimpleNamespace(Name="Chart 1", Chart=chart)
+    monkeypatch.setattr(charts, "_get_chart_shape", Mock(return_value=shape))
+    reader = Mock(return_value=(["A"], [{"name": "Sales", "values": [7.0]}]))
+    workbook = Mock(side_effect=AssertionError("Workbook must not be queried"))
+    monkeypatch.setattr(charts, "_read_rpc_chart", reader)
+    monkeypatch.setattr(charts, "chart_workbook", workbook)
+    result = charts.get_chart_data(
+        charts.GetChartDataInput(slide_index=1, shape_name_or_index="Chart 1")
+    )
+    assert result["categories"] == ["A"]
+    assert result["series"] == [{"name": "Sales", "values": [7.0]}]
+    workbook.assert_not_called()
+
+
+def test_rpc_chart_add_verifies_series_without_owning_the_data_editor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chart = Mock(spec=RpcObject)
+    session = Mock()
+    shape = SimpleNamespace(Name="Chart 1", ZOrderPosition=2, Chart=chart)
+    shapes = session.get_document.return_value.Slides.return_value.Shapes
+    shapes.AddChart2.return_value = shape
+    reader = Mock(return_value=(["A"], [{"name": "Sales", "values": [7.0]}]))
+    workbook = Mock(side_effect=AssertionError("Workbook must not be queried"))
+    monkeypatch.setattr(charts, "get_session", lambda component: session)
+    monkeypatch.setattr(charts, "goto_slide", Mock())
+    monkeypatch.setattr(charts, "_read_rpc_chart", reader)
+    monkeypatch.setattr(charts, "chart_workbook", workbook)
+    result = charts.add_chart(charts.AddChartInput(slide_index=1))
+    assert result["success"] and result["shape_name"] == "Chart 1"
+    reader.assert_called_once_with(chart)
+    workbook.assert_not_called()
 
 
 def test_chart_layout_accepts_quoted_sheet_names(

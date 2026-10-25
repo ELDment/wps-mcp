@@ -1,6 +1,6 @@
 """Inspect and manage native Writer styles and inheritance."""
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -50,6 +50,12 @@ class StyleInput(DocumentInput):
     """Identify a document style by its local native name."""
 
     name: str = Field(min_length=1)
+
+
+class ReadStyleInput(DocumentInput):
+    """Read a style by local name or a negative built-in style identifier."""
+
+    name: Annotated[str, Field(min_length=1)] | Annotated[int, Field(lt=0)]
 
 
 class StyleSettingsInput(StyleInput):
@@ -249,8 +255,8 @@ def list_styles(params: ListStylesInput) -> JsonObject:
     component="writer",
     annotations=READ_ANNOTATIONS,
 )
-def read_style(params: StyleInput) -> JsonObject:
-    """Read native style formatting by its local document name."""
+def read_style(params: ReadStyleInput) -> JsonObject:
+    """Read formatting by local name or a negative built-in style ID."""
     document = get_session("writer").get_document(params.document)
     return style_details(
         document, document.Styles.Item(params.name), formatting=True

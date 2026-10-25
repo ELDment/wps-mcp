@@ -45,6 +45,7 @@ from src.presentation.text_models import (
     TextRangeSpec,
 )
 from src.presentation.text_spans import (
+    find_spans,
     python_span,
     resolve_span,
     run_offsets,
@@ -351,24 +352,12 @@ def find_replace_text(params: FindReplaceTextInput) -> JsonObject:
             if not shape.HasTextFrame:
                 continue
             text_range = shape.TextFrame.TextRange
-            spans = []
-            after = 0
-            text_length = utf16_length(str(text_range.Text))
-            # WPS rejects Find(After=Length) with E_FAIL.
-            while after < text_length:
-                match = text_range.Find(
-                    find_text,
-                    after,
-                    MSO_TRUE if params.match_case else MSO_FALSE,
-                    MSO_TRUE if params.whole_words else MSO_FALSE,
-                )
-                if match is None:
-                    break
-                start, length = int(match.Start), int(match.Length)
-                if length <= 0 or start + length - 1 <= after:
-                    raise RuntimeError("WPS text search did not advance")
-                spans.append((start, length))
-                after = start + length - 1
+            spans = find_spans(
+                str(text_range.Text),
+                find_text,
+                match_case=params.match_case,
+                whole_words=params.whole_words,
+            )
             replacement = params.replace_text
             if not find_only:
                 assert replacement is not None

@@ -339,7 +339,9 @@ def test_style_read_preserves_native_undefined_format_sentinel(
     style.Font.Bold = 9999999
     style.BaseStyle = SimpleNamespace(NameLocal="Normal")
     document.Styles.Item.return_value = style
-    result = writer_styles.read_style(writer_styles.StyleInput(name="Custom"))
+    result = writer_styles.read_style(
+        writer_styles.ReadStyleInput(name="Custom")
+    )
     assert result["character"]["bold"] == 9999999
     assert result["base_style"] == "Normal"
     assert result["paragraph"]["line_spacing_rule"] == 0
@@ -350,7 +352,7 @@ def test_style_read_handles_empty_native_base_variant(document: Mock) -> None:
     style.BaseStyle = None
     document.Styles.Item.return_value = style
     assert (
-        writer_styles.read_style(writer_styles.StyleInput(name="Normal"))[
+        writer_styles.read_style(writer_styles.ReadStyleInput(name="Normal"))[
             "base_style"
         ]
         is None
@@ -374,9 +376,9 @@ def test_native_root_style_read_and_inheritance_skip_unavailable_base_property(
         local_name: root,
     }[key]
     assert (
-        writer_styles.read_style(writer_styles.StyleInput(name=local_name))[
-            "base_style"
-        ]
+        writer_styles.read_style(
+            writer_styles.ReadStyleInput(name=local_name)
+        )["base_style"]
         is None
     )
     created = make_style("Custom", style_type)
@@ -408,7 +410,9 @@ def test_nonroot_base_property_failures_are_not_suppressed(
     }[key]
     with pytest.raises(RuntimeError, match="native BaseStyle access failed"):
         if operation == "read":
-            writer_styles.read_style(writer_styles.StyleInput(name="Heading"))
+            writer_styles.read_style(
+                writer_styles.ReadStyleInput(name="Heading")
+            )
         else:
             writer_styles.create_style(
                 writer_styles.CreateStyleInput(
@@ -429,7 +433,7 @@ def test_custom_style_named_normal_is_not_treated_as_a_native_root(
     type(style).BaseStyle = failure
     document.Styles.Item.return_value = style
     with pytest.raises(RuntimeError, match="custom style access failed"):
-        writer_styles.read_style(writer_styles.StyleInput(name="Normal"))
+        writer_styles.read_style(writer_styles.ReadStyleInput(name="Normal"))
     failure.assert_called_once_with()
     document.Styles.Item.assert_called_once_with("Normal")
 
@@ -441,7 +445,7 @@ def test_root_lookup_errors_are_propagated(document: Mock) -> None:
         RuntimeError("root lookup failed"),
     ]
     with pytest.raises(RuntimeError, match="root lookup failed"):
-        writer_styles.read_style(writer_styles.StyleInput(name="正文"))
+        writer_styles.read_style(writer_styles.ReadStyleInput(name="正文"))
 
 
 def test_style_create_resolves_missing_dependencies_before_add(

@@ -1,15 +1,15 @@
 """Resolve explicit document identities without foreground heuristics."""
 
-import ntpath
 from collections.abc import Sequence
+from os import path
 
 from src.errors import DocumentNotFoundError
 from src.models import NativeObject
 
 
 def document_key(value: str | object) -> str:
-    """Compare Windows paths without depending on the test platform."""
-    return ntpath.normcase(ntpath.normpath(str(value).strip()))
+    """Normalize document identities using the host filesystem rules."""
+    return path.normcase(path.normpath(str(value)))
 
 
 def select_document(
@@ -40,14 +40,14 @@ def select_document(
         return exact[0]
     matches = (
         []
-        if ntpath.dirname(wanted)
+        if path.dirname(wanted)
         else [
             doc
             for doc in documents
             if key
             in {
                 document_key(doc.Name),
-                document_key(ntpath.splitext(doc.Name)[0]),
+                document_key(path.splitext(doc.Name)[0]),
             }
         ]
     )

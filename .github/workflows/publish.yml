@@ -2,7 +2,7 @@ name: Publish to PyPI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -18,11 +18,19 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.14"
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.14"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -41,7 +49,7 @@ jobs:
     needs: verify
     if: >-
       github.repository == 'ELDment/wps-mcp' &&
-      github.ref == 'refs/heads/main' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feat/')) &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
@@ -54,69 +62,7 @@ jobs:
       - run: uv sync --locked --group dev
 
       - name: Prepare dated release
-        shell: uv run --no-sync python {0}
-        run: |
-          import json
-          import os
-          import re
-          import subprocess
-          import tomllib
-          from datetime import datetime, timedelta, timezone
-          from pathlib import Path
-          from urllib.error import HTTPError
-          from urllib.request import urlopen
-
-          projectPath = Path("pyproject.toml")
-          project = tomllib.loads(projectPath.read_text(encoding="utf-8"))
-          packageName = project["project"]["name"]
-          releaseDate = datetime.now(timezone(timedelta(hours=8)))
-          baseVersion = f"{releaseDate.year}.{releaseDate.month}.{releaseDate.day}"
-
-          try:
-              with urlopen(
-                  f"https://pypi.org/pypi/{packageName}/json", timeout=30
-              ) as response:
-                  releases = json.load(response)["releases"]
-          except HTTPError as error:
-              if error.code != 404:
-                  raise
-              releases = {}
-
-          releasePattern = re.compile(
-              rf"{re.escape(baseVersion)}(?:\.post(\d+))?"
-          )
-          revisions = [
-              int(match[1] or 0)
-              for version in releases
-              if (match := releasePattern.fullmatch(version))
-          ]
-          releaseVersion = baseVersion
-          if revisions:
-              releaseVersion += f".post{max(revisions) + 1}"
-
-          sourcePath = Path("src/__init__.py")
-          source, replacements = re.subn(
-              r'^__version__ = "[^"]+"$',
-              f'__version__ = "{releaseVersion}"',
-              sourcePath.read_text(encoding="utf-8"),
-              flags=re.MULTILINE,
-          )
-          if replacements != 1:
-              raise SystemExit("Expected exactly one src.__version__ assignment")
-
-          # Re-locking may need metadata beyond the current Python's cache.
-          subprocess.run(
-              ["uv", "version", releaseVersion, "--no-sync"],
-              check=True,
-          )
-          sourcePath.write_text(source, encoding="utf-8", newline="\r\n")
-          for path in (projectPath, Path("uv.lock")):
-              content = path.read_text(encoding="utf-8")
-              path.write_text(content, encoding="utf-8", newline="\r\n")
-
-          print(f"Prepared {packageName} {releaseVersion}")
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write(f"Prepared **{packageName} {releaseVersion}** for PyPI.\n")
+        run: uv run --no-sync python scripts/ci/prepare_release.py
 
       - name: Build distributions with locked build dependencies
         run: uv build --no-sources --no-build-isolation

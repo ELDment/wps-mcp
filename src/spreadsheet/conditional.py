@@ -5,7 +5,7 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 
 from src.common.colors import hex_to_int, int_to_hex
-from src.errors import WpsError
+from src.errors import NativeError, WpsError
 from src.models import Color, JsonObject, NativeObject
 from src.protocol.definitions import (
     READ_ANNOTATIONS,
@@ -176,12 +176,16 @@ def condition_style(rule: NativeObject) -> dict[str, JsonObject]:
                 theme = getattr(native, prefix + "ThemeColor")
             except Exception as error:
                 info = getattr(error, "excepinfo", None)
-                if not (
+                missing_theme = (
+                    isinstance(error, NativeError)
+                    and error.hresult == -2147483645
+                ) or (
                     getattr(error, "hresult", None) == -2147352567
                     and isinstance(info, tuple)
                     and len(info) > 5
                     and info[5] in {-2146827284, -2147024809}
-                ):
+                )
+                if not missing_theme:
                     raise
             if theme is not None and int(theme) > 0:
                 attributes[prefix + "ThemeColor"] = theme

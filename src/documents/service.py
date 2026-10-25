@@ -1,7 +1,6 @@
 """Perform document lifecycle operations independently of MCP registration."""
 
 import logging
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -25,10 +24,10 @@ from src.documents.models import (
     SaveInput,
 )
 from src.models import InputModel, JsonObject, NativeObject
-from src.native.components import SPECS
+from src.native.discovery import detect_components as inspect_components
 from src.native.runtime import get_session
 from src.native.selection import document_key
-from src.native.session import WpsSession
+from src.native.session import LocalSession
 from src.native.state import temporary_attributes
 from src.presentation.formats import check_presentation_format
 
@@ -231,6 +230,18 @@ def close_document(params: CloseInput) -> JsonObject:
     session = get_session(params.component)
     document = session.get_document(params.document)
     identity = describe_document(document)
+
+    def verify_closed() -> None:
+        if any(
+            document_key(opened.FullName)
+            == document_key(identity["full_name"])
+            for opened in session.get_documents()
+        ):
+            raise RuntimeError(
+                "WPS did not close the document; dismiss its dialog "
+                "and inspect the document before repeating the operation"
+            )
+
     if params.save_changes:
         save_document(
             SaveInput(
@@ -247,6 +258,7 @@ def close_document(params: CloseInput) -> JsonObject:
             document.Saved = True
         try:
             document.Close()
+            verify_closed()
         except Exception:
             if marked_saved:
                 try:
@@ -259,6 +271,7 @@ def close_document(params: CloseInput) -> JsonObject:
             raise
     else:
         document.Close(False)
+        verify_closed()
     if session.target_name and document_key(
         session.target_name
     ) == document_key(identity["full_name"]):
@@ -292,7 +305,7 @@ def get_document_info(params: ComponentDocumentInput) -> JsonObject:
 
 
 def export_pdf_to(
-    session: WpsSession, document: NativeObject, file_path: Path
+    session: LocalSession, document: NativeObject, file_path: Path
 ) -> JsonObject:
     """Export through native WPS and verify the PDF output signature."""
     if session.component == "writer":
@@ -333,34 +346,5 @@ def preview_document(params: PreviewInput) -> bytes:
 
 
 def detect_components(params: InputModel) -> JsonObject:
-    """Inspect WPS registration without starting applications."""
-    result = []
-    for component, spec in SPECS.items():
-        registered = False
-        if sys.platform == "win32":
-            import winreg
-
-            try:
-                with winreg.OpenKey(
-                    winreg.HKEY_CLASSES_ROOT, spec.prog_id + "\\CLSID"
-                ):
-                    registered = True
-            except FileNotFoundError:
-                pass
-        result.append(
-            {
-                "component": component,
-                "prog_id": spec.prog_id,
-                "registered": registered,
-                "formats": list(spec.formats),
-                "native_execution_verified": False,
-            }
-        )
-    return {
-        "platform": sys.platform,
-        "components": result,
-        "note": (
-            "Registration does not verify support for every feature "
-            "in this WPS build."
-        ),
-    }
+    """Inspect platform prerequisites without starting applications."""
+    return inspect_components()

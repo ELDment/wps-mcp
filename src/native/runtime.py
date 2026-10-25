@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Callable
 from contextlib import ExitStack
 from contextvars import Token
@@ -13,7 +14,7 @@ from src.errors import WpsError
 from src.models import Component
 from src.native.components import SPECS
 from src.native.context import CURRENT_RUNTIME
-from src.native.session import WpsSession
+from src.native.session import ExecutionSession, LocalSession
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +23,12 @@ class Runtime:
     """Own the sessions and temporary resources of one service."""
 
     def __init__(
-        self, session_factory: Callable[[Component], WpsSession] = WpsSession
+        self,
+        session_factory: Callable[[Component], ExecutionSession] | None = None,
     ) -> None:
         self.resources = ExitStack()
-        self.sessions = {
-            component: session_factory(component) for component in SPECS
-        }
+        factory = session_factory or create_session
+        self.sessions = {component: factory(component) for component in SPECS}
         self._lock = Lock()
         self._closed = False
         self._token: Token[Runtime | None] | None = None
@@ -64,7 +65,7 @@ class Runtime:
             if self._closed:
                 return
             self._closed = True
-        pending: list[WpsSession] = []
+        pending: list[ExecutionSession] = []
         errors: list[str] = []
         for session in self.sessions.values():
             try:
@@ -82,8 +83,7 @@ class Runtime:
                 try:
                     for session in pending:
                         try:
-                            if session.worker.thread is not None:
-                                session.worker.thread.join()
+                            session.wait()
                             session.close()
                         except Exception:
                             logger.exception("Deferred WPS cleanup failed")
@@ -115,6 +115,20 @@ def get_runtime() -> Runtime:
     return runtime
 
 
-def get_session(component: Component) -> WpsSession:
-    """Return the component session owned by the active runtime."""
-    return get_runtime().sessions[component]
+def create_session(component: Component) -> ExecutionSession:
+    """Select a lazy backend without importing its native dependencies."""
+    if sys.platform == "linux":
+        from src.native.process import ProcessSession
+
+        return ProcessSession(component)
+    from src.native.windows import ComSession
+
+    return ComSession(component)
+
+
+def get_session(component: Component) -> LocalSession:
+    """Access native objects only from a local backend execution context."""
+    session = get_runtime().sessions[component]
+    if not isinstance(session, LocalSession):
+        raise WpsError("Native objects are confined to the WPS worker process")
+    return session

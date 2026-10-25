@@ -166,6 +166,31 @@ def test_find_rejects_legacy_scope_field() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("text_value", "needle", "match_case", "whole_words", "expected"),
+    [
+        ("😀a😀a", "a", True, False, [(3, 1), (6, 1)]),
+        ("Cat cat concatenate", "cat", False, True, [(1, 3), (5, 3)]),
+        ("Cat cat concatenate", "cat", True, True, [(5, 3)]),
+        ("a.b axb", "a.b", True, False, [(1, 3)]),
+        ("中文😀", "missing", False, False, []),
+    ],
+)
+def test_literal_search_preserves_unicode_offsets_and_boundaries(
+    text_value: str,
+    needle: str,
+    match_case: bool,
+    whole_words: bool,
+    expected: list[tuple[int, int]],
+) -> None:
+    assert (
+        text_spans.find_spans(
+            text_value, needle, match_case=match_case, whole_words=whole_words
+        )
+        == expected
+    )
+
+
 def test_colors_are_checked_before_native_access() -> None:
     for fields in (
         {"color": "unknown"},
