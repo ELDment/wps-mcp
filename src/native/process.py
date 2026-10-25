@@ -98,6 +98,7 @@ class ProcessSession:
             self._process = subprocess.Popen(
                 [
                     sys.executable,
+                    "-P",
                     "-m",
                     "src.protocol.host",
                     str(child.fileno()),
