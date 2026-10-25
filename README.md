@@ -214,5 +214,5 @@ uv sync --locked --python 3.11
 ---
 
 <p align="right">
-  <sub>论坛 · <a href="https://linux.do/t/topic/3064793" title="LINUX DO 社区">LINUX DO</a></sub>
+  <sub>论坛 · <a href="https://linux.do/t/topic/3064793" title="LINUX DO 社区" target="_blank" rel="noopener noreferrer">LINUX DO</a></sub>
 </p>

@@ -12,6 +12,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, InputRequiredResult
 
+from src import __version__
 from src.models import JsonObject
 from src.native.context import CURRENT_RUNTIME
 from src.native.runtime import Runtime
@@ -64,6 +65,7 @@ def build_server() -> WpsServer:
     """Build a complete tool catalog without connecting to native WPS."""
     server = WpsServer(
         "wps-mcp",
+        version=__version__,
         lifespan=lifespan,
         instructions=(
             "Control WPS Writer, ET and Presentation on Windows and Linux. "

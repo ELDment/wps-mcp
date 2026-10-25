@@ -10,6 +10,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
+from src import __version__
+
 
 @pytest.mark.parametrize("entry_point", ["module", "console"])
 def test_stdio_catalog_validation_and_shutdown(entry_point: str) -> None:
@@ -35,6 +37,7 @@ def test_stdio_catalog_validation_and_shutdown(entry_point: str) -> None:
             async with stdio_client(parameters) as (read, write):
                 async with ClientSession(read, write) as client:
                     initialized = await client.initialize()
+                    assert initialized.server_info.version == __version__
                     assert initialized.instructions is not None
                     assert "Do not attempt to hide WPP" in (
                         initialized.instructions
