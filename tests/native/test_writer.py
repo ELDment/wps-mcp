@@ -1,8 +1,12 @@
 """Exercise native Writer tools using only test-owned files."""
 
 from pathlib import Path
+from xml.etree import ElementTree
+from zipfile import ZipFile
 
 import anyio
+import pytest
+from PIL import Image
 
 from tests.native.client import NativeClient, native_client
 
@@ -18,30 +22,6 @@ async def builtin_style_names(
         )
         names.append(str(result["name"]))
     return names[0], names[1]
-
-
-async def save_and_reopen(
-    client: NativeClient, identity: str, target: Path
-) -> str:
-    """Round-trip DOCX content while retaining cleanup ownership."""
-    saved = await client.call(
-        "wps_documents",
-        "save",
-        component="writer",
-        document=identity,
-        file_path=str(target),
-    )
-    assert saved["saved"] and target.is_file() and target.stat().st_size > 0
-    await client.call(
-        "wps_documents",
-        "close",
-        component="writer",
-        document=saved["full_name"],
-    )
-    reopened = await client.call(
-        "wps_documents", "open", component="writer", file_path=str(target)
-    )
-    return str(reopened["full_name"])
 
 
 def test_native_writer_revisions_comments_and_persistence(
@@ -131,8 +111,8 @@ def test_native_writer_revisions_comments_and_persistence(
                 "wps_writer_comments", "list", document=identity
             )
             assert comments["total"] == 1
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "writer-review.docx"
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-review.docx"
             )
             text = await client.call(
                 "wps_writer_text", "read", document=identity
@@ -239,8 +219,8 @@ def test_native_writer_style_inheritance_and_persistence(
                 and style["character"]["italic"] != 0
             )
             assert style["paragraph"]["space_after"] == 12.0
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "writer-styles.docx"
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-styles.docx"
             )
             styles = await client.call(
                 "wps_writer_styles", "list", document=identity, built_in=False
@@ -419,8 +399,8 @@ def test_native_writer_toc_notes_cross_references_and_persistence(
                 assert updated["updated"] and updated["result"]["text"].strip()
                 assert expected in updated["result"]["text"]
                 reference_codes.append(updated["code"])
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "writer-references.docx"
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-references.docx"
             )
             tocs = await client.call(
                 "wps_writer_toc", "list", document=identity
@@ -504,5 +484,390 @@ def test_native_writer_toc_notes_cross_references_and_persistence(
             assert not (
                 await client.call("wps_writer_toc", "list", document=identity)
             )["tables_of_contents"]
+
+    anyio.run(scenario)
+
+
+NAMESPACES = {
+    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+}
+
+
+def document_xml(path: Path) -> ElementTree.Element:
+    """Inspect the document saved by WPS without modifying its package."""
+    with ZipFile(path) as archive:
+        return ElementTree.fromstring(archive.read("word/document.xml"))
+
+
+def test_native_writer_text_edits_format_and_bookmark_delete(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        async with native_client() as client:
+            created = await client.call(
+                "wps_documents", "create", component="writer"
+            )
+            identity = created["full_name"]
+            await client.call(
+                "wps_writer_text",
+                "insert",
+                document=identity,
+                position=0,
+                text="Alpha 😀 Alpha\rSecond line.\r",
+            )
+            found = await client.call(
+                "wps_writer_text",
+                "find",
+                document=identity,
+                text="Alpha",
+                match_case=True,
+                whole_word=True,
+            )
+            assert [
+                (item["start"], item["end"]) for item in found["matches"]
+            ] == [
+                (0, 5),
+                (9, 14),
+            ]
+            assert not found["has_more"]
+            changed = await client.call(
+                "wps_writer_text",
+                "replace_matches",
+                document=identity,
+                text="Alpha",
+                replacement="Beta",
+                replace_all=True,
+            )
+            assert changed["replaced_count"] == 2
+            replaced = await client.call(
+                "wps_writer_text",
+                "replace",
+                document=identity,
+                start=0,
+                end=4,
+                text="Root",
+            )
+            assert replaced["text"] == "Root"
+            deleted = await client.call(
+                "wps_writer_text",
+                "delete",
+                document=identity,
+                start=5,
+                end=7,
+            )
+            assert deleted["deleted"]
+            await client.call(
+                "wps_writer_text",
+                "format",
+                document=identity,
+                start=0,
+                end=4,
+                character={
+                    "font_size": 14.0,
+                    "bold": True,
+                    "color": "#123456",
+                },
+                paragraph={"alignment": "center", "left_indent": 12.0},
+            )
+            await client.call(
+                "wps_writer_bookmarks",
+                "add",
+                document=identity,
+                name="DeleteOnlyAnchor",
+                start=0,
+                end=4,
+            )
+            removed = await client.call(
+                "wps_writer_bookmarks",
+                "delete",
+                document=identity,
+                name="DeleteOnlyAnchor",
+            )
+            assert removed["deleted"]
+            assert not (
+                await client.call(
+                    "wps_writer_bookmarks", "list", document=identity
+                )
+            )["bookmarks"]
+            target = tmp_path / "writer-text.docx"
+            identity = await client.save_and_reopen("writer", identity, target)
+            text = await client.call(
+                "wps_writer_text", "read", document=identity
+            )
+            assert text["text"].startswith("Root  Beta\rSecond line.\r")
+            assert "😀" not in text["text"]
+            root = document_xml(target)
+            run = next(
+                run
+                for run in root.findall(".//w:r", NAMESPACES)
+                if "".join(run.itertext()) == "Root"
+            )
+            bold = run.find("w:rPr/w:b", NAMESPACES)
+            color = run.find("w:rPr/w:color", NAMESPACES)
+            size = run.find("w:rPr/w:sz", NAMESPACES)
+            assert bold is not None
+            assert (
+                color is not None
+                and color.get(f"{{{NAMESPACES['w']}}}val", "").lower()
+                == "123456"
+            )
+            assert (
+                size is not None
+                and size.get(f"{{{NAMESPACES['w']}}}val") == "28"
+            )
+            alignment = root.find(".//w:pPr/w:jc", NAMESPACES)
+            assert alignment is not None
+            assert alignment.get(f"{{{NAMESPACES['w']}}}val") == "center"
+
+    anyio.run(scenario)
+
+
+def test_native_writer_tables_image_and_statistics(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        image_path = tmp_path / "embedded.png"
+        Image.new("RGB", (40, 20), "#336699").save(image_path)
+        async with native_client() as client:
+            created = await client.call(
+                "wps_documents", "create", component="writer"
+            )
+            identity = created["full_name"]
+            await client.call(
+                "wps_writer_tables",
+                "add",
+                document=identity,
+                position=0,
+                data=[["标题", "值"], [0, False]],
+            )
+            listed = await client.call(
+                "wps_writer_tables", "list", document=identity
+            )
+            assert len(listed["tables"]) == 1
+            assert listed["tables"][0]["cell_count"] == 4
+            table = await client.call(
+                "wps_writer_tables",
+                "read",
+                document=identity,
+                table_index=1,
+            )
+            assert [cell["text"] for cell in table["cells"]] == [
+                "标题",
+                "值",
+                "0",
+                "false",
+            ]
+            written = await client.call(
+                "wps_writer_tables",
+                "write",
+                document=identity,
+                table_index=1,
+                start_row=2,
+                data=[[None, "替换"]],
+            )
+            assert written["cells_written"] == 2
+            await client.call(
+                "wps_writer_tables",
+                "format_cell",
+                document=identity,
+                table_index=1,
+                row=1,
+                column=1,
+                character={"bold": True, "color": "#FFFFFF"},
+                alignment="center",
+                vertical_alignment="center",
+                fill_color="#336699",
+            )
+            for action, expected_count in (
+                ("insert_row", 6),
+                ("insert_column", 9),
+                ("delete_column", 6),
+                ("delete_row", 4),
+            ):
+                await client.call(
+                    "wps_writer_tables",
+                    "change",
+                    document=identity,
+                    table_index=1,
+                    action=action,
+                    position=2,
+                )
+                table = await client.call(
+                    "wps_writer_tables",
+                    "read",
+                    document=identity,
+                    table_index=1,
+                )
+                assert len(table["cells"]) == expected_count
+            assert [cell["text"] for cell in table["cells"]] == [
+                "标题",
+                "值",
+                "",
+                "替换",
+            ]
+            target = tmp_path / "writer-table.docx"
+            identity = await client.save_and_reopen("writer", identity, target)
+            root = document_xml(target)
+            fill = root.find(".//w:tcPr/w:shd", NAMESPACES)
+            assert fill is not None
+            assert (
+                fill.get(f"{{{NAMESPACES['w']}}}fill", "").lower() == "336699"
+            )
+            vertical = root.find(".//w:tcPr/w:vAlign", NAMESPACES)
+            assert vertical is not None
+            assert vertical.get(f"{{{NAMESPACES['w']}}}val") == "center"
+            await client.call(
+                "wps_writer_tables",
+                "delete",
+                document=identity,
+                table_index=1,
+            )
+            assert not (
+                await client.call(
+                    "wps_writer_tables", "list", document=identity
+                )
+            )["tables"]
+            added = await client.call(
+                "wps_writer_images",
+                "add",
+                document=identity,
+                position=0,
+                path=str(image_path),
+                width=72.0,
+                height=36.0,
+                alternative_text="Native embedded image",
+            )
+            assert added["width"] == pytest.approx(72.0, abs=0.2)
+            assert added["height"] == pytest.approx(36.0, abs=0.2)
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-image.docx"
+            )
+            statistics = await client.call(
+                "wps_writer_statistics", "read", document=identity
+            )
+            assert statistics["tables"] == 0
+            assert statistics["inline_images"] == 1
+            assert statistics["sections"] == 1
+            assert statistics["range_end"] > 1
+
+    anyio.run(scenario)
+
+
+def test_native_writer_sections_headers_and_page_setup(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        async with native_client() as client:
+            created = await client.call(
+                "wps_documents", "create", component="writer"
+            )
+            identity = created["full_name"]
+            await client.call(
+                "wps_writer_text",
+                "insert",
+                document=identity,
+                position=0,
+                text="First section.\r",
+            )
+            await client.call(
+                "wps_writer_pages",
+                "setup",
+                document=identity,
+                orientation="landscape",
+                page_width=792.0,
+                page_height=612.0,
+                margin_top=36.0,
+                margin_bottom=36.0,
+                margin_left=42.0,
+                margin_right=42.0,
+            )
+            first_header = "Original first header"
+            await client.call(
+                "wps_writer_pages",
+                "write_header_footer",
+                document=identity,
+                location="header",
+                text=first_header,
+            )
+            for kind in (
+                "line",
+                "page",
+                "section_next_page",
+                "section_continuous",
+            ):
+                text = await client.call(
+                    "wps_writer_text", "read", document=identity
+                )
+                await client.call(
+                    "wps_writer_pages",
+                    "insert_break",
+                    document=identity,
+                    position=text["end"] - 1,
+                    kind=kind,
+                )
+                text = await client.call(
+                    "wps_writer_text", "read", document=identity
+                )
+                await client.call(
+                    "wps_writer_text",
+                    "insert",
+                    document=identity,
+                    position=text["end"] - 1,
+                    text=f"After {kind}.\r",
+                )
+            sections = await client.call(
+                "wps_writer_pages", "sections", document=identity
+            )
+            assert len(sections["sections"]) == 3
+            setup = sections["sections"][0]
+            assert setup["orientation"] == "landscape"
+            for key, value in {
+                "page_width": 792.0,
+                "page_height": 612.0,
+                "margin_top": 36.0,
+                "margin_left": 42.0,
+            }.items():
+                assert setup[key] == pytest.approx(value, abs=0.2)
+            variants = (
+                ("header", "primary", "独立第二节页眉"),
+                ("footer", "first_page", "First page footer"),
+                ("footer", "even_pages", "Even page footer"),
+            )
+            for location, variant, value in variants:
+                written = await client.call(
+                    "wps_writer_pages",
+                    "write_header_footer",
+                    document=identity,
+                    section_index=2,
+                    location=location,
+                    variant=variant,
+                    text=value,
+                    link_to_previous=False,
+                )
+                assert value in written["text"]
+                assert not written["link_to_previous"]
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-pages.docx"
+            )
+            for location, variant, value in variants:
+                item = await client.call(
+                    "wps_writer_pages",
+                    "read_header_footer",
+                    document=identity,
+                    section_index=2,
+                    location=location,
+                    variant=variant,
+                )
+                assert value in item["text"]
+                assert not item["link_to_previous"]
+            preserved = await client.call(
+                "wps_writer_pages",
+                "read_header_footer",
+                document=identity,
+                location="header",
+            )
+            assert first_header in preserved["text"]
+            statistics = await client.call(
+                "wps_writer_statistics", "read", document=identity
+            )
+            assert statistics["sections"] == 3
+            assert statistics["pages"] >= 2
+            assert statistics["words"] > 0
 
     anyio.run(scenario)

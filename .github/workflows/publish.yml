@@ -31,6 +31,10 @@ jobs:
             python-version: "3.11"
           - os: ubuntu-latest
             python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.14"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -43,6 +47,7 @@ jobs:
       - run: uv run mypy
       - run: uv run pyright
       - run: uv build
+      - run: uv run --no-sync python scripts/ci/check_wheel.py
       - run: uv run pytest -m "not native"
 
   build:
@@ -66,6 +71,8 @@ jobs:
 
       - name: Build distributions with locked build dependencies
         run: uv build --no-sources --no-build-isolation
+      - name: Verify the release wheel outside the source checkout
+        run: uv run --no-sync python scripts/ci/check_wheel.py
       - uses: actions/upload-artifact@v4
         with:
           name: pypi-distributions

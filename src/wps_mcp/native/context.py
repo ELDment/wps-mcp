@@ -1,0 +1,24 @@
+"""Keep service ownership and document targeting local to each call."""
+
+from __future__ import annotations
+
+from contextvars import ContextVar
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from wps_mcp.native.runtime import Runtime
+
+
+CALL_DOCUMENT: ContextVar[str | None] = ContextVar(
+    "wps_document", default=None
+)
+
+
+CALL_OPERATION: ContextVar[str | None] = ContextVar(
+    "wps_operation", default=None
+)
+
+
+CURRENT_RUNTIME: ContextVar[Runtime | None] = ContextVar(
+    "wps_runtime", default=None
+)
