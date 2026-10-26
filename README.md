@@ -28,6 +28,8 @@
   </tr>
 </table>
 
+<p align="right"><sub>* 上方视频可能因网络原因无法加载或播放。</sub></p>
+
 ## 功能与平台对比
 
 | 组件 | 功能 | Windows | Linux | macOS |
