@@ -24,30 +24,6 @@ async def builtin_style_names(
     return names[0], names[1]
 
 
-async def save_and_reopen(
-    client: NativeClient, identity: str, target: Path
-) -> str:
-    """Round-trip DOCX content while retaining cleanup ownership."""
-    saved = await client.call(
-        "wps_documents",
-        "save",
-        component="writer",
-        document=identity,
-        file_path=str(target),
-    )
-    assert saved["saved"] and target.is_file() and target.stat().st_size > 0
-    await client.call(
-        "wps_documents",
-        "close",
-        component="writer",
-        document=saved["full_name"],
-    )
-    reopened = await client.call(
-        "wps_documents", "open", component="writer", file_path=str(target)
-    )
-    return str(reopened["full_name"])
-
-
 def test_native_writer_revisions_comments_and_persistence(
     tmp_path: Path,
 ) -> None:
@@ -135,8 +111,8 @@ def test_native_writer_revisions_comments_and_persistence(
                 "wps_writer_comments", "list", document=identity
             )
             assert comments["total"] == 1
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "writer-review.docx"
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-review.docx"
             )
             text = await client.call(
                 "wps_writer_text", "read", document=identity
@@ -243,8 +219,8 @@ def test_native_writer_style_inheritance_and_persistence(
                 and style["character"]["italic"] != 0
             )
             assert style["paragraph"]["space_after"] == 12.0
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "writer-styles.docx"
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-styles.docx"
             )
             styles = await client.call(
                 "wps_writer_styles", "list", document=identity, built_in=False
@@ -423,8 +399,8 @@ def test_native_writer_toc_notes_cross_references_and_persistence(
                 assert updated["updated"] and updated["result"]["text"].strip()
                 assert expected in updated["result"]["text"]
                 reference_codes.append(updated["code"])
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "writer-references.docx"
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-references.docx"
             )
             tocs = await client.call(
                 "wps_writer_toc", "list", document=identity
@@ -614,7 +590,7 @@ def test_native_writer_text_edits_format_and_bookmark_delete(
                 )
             )["bookmarks"]
             target = tmp_path / "writer-text.docx"
-            identity = await save_and_reopen(client, identity, target)
+            identity = await client.save_and_reopen("writer", identity, target)
             text = await client.call(
                 "wps_writer_text", "read", document=identity
             )
@@ -728,7 +704,7 @@ def test_native_writer_tables_image_and_statistics(tmp_path: Path) -> None:
                 "替换",
             ]
             target = tmp_path / "writer-table.docx"
-            identity = await save_and_reopen(client, identity, target)
+            identity = await client.save_and_reopen("writer", identity, target)
             root = document_xml(target)
             fill = root.find(".//w:tcPr/w:shd", NAMESPACES)
             assert fill is not None
@@ -761,8 +737,8 @@ def test_native_writer_tables_image_and_statistics(tmp_path: Path) -> None:
             )
             assert added["width"] == pytest.approx(72.0, abs=0.2)
             assert added["height"] == pytest.approx(36.0, abs=0.2)
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "writer-image.docx"
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-image.docx"
             )
             statistics = await client.call(
                 "wps_writer_statistics", "read", document=identity
@@ -866,8 +842,8 @@ def test_native_writer_sections_headers_and_page_setup(tmp_path: Path) -> None:
                 )
                 assert value in written["text"]
                 assert not written["link_to_previous"]
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "writer-pages.docx"
+            identity = await client.save_and_reopen(
+                "writer", identity, tmp_path / "writer-pages.docx"
             )
             for location, variant, value in variants:
                 item = await client.call(

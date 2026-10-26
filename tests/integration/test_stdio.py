@@ -10,7 +10,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
-from src import __version__
+from wps_mcp import __version__
 
 
 @pytest.mark.parametrize("entry_point", ["module", "console"])
@@ -19,7 +19,7 @@ def test_stdio_catalog_validation_and_shutdown(entry_point: str) -> None:
         root = Path(__file__).resolve().parents[2]
         executable = Path(sys.executable)
         command = str(executable)
-        arguments = ["-m", "src"]
+        arguments = ["-m", "wps_mcp"]
         if entry_point == "console":
             command = str(
                 executable.with_name(
@@ -31,7 +31,7 @@ def test_stdio_catalog_validation_and_shutdown(entry_point: str) -> None:
             command=command,
             args=arguments,
             cwd=root,
-            env={**os.environ, "PYTHONPATH": str(root)},
+            env={**os.environ, "PYTHONPATH": str(root / "src")},
         )
         with anyio.fail_after(20):
             async with stdio_client(parameters) as (read, write):
@@ -61,8 +61,14 @@ def test_stdio_catalog_validation_and_shutdown(entry_point: str) -> None:
                     )
                     assert rejected.is_error
                     hidden = await client.call_tool(
-                        "wps_ppt_app",
-                        {"params": {"operation": "connect", "visible": False}},
+                        "wps_components",
+                        {
+                            "params": {
+                                "operation": "connect",
+                                "component": "wpp",
+                                "visible": False,
+                            }
+                        },
                     )
                     assert hidden.is_error
                     assert any(

@@ -9,28 +9,6 @@ import anyio
 from tests.native.client import NativeClient, native_client
 
 
-async def save_and_reopen(
-    client: NativeClient, identity: str, path: Path
-) -> str:
-    """Round-trip XLSX content while retaining cleanup ownership."""
-    saved = await client.call(
-        "wps_documents",
-        "save",
-        component="et",
-        document=identity,
-        file_path=str(path),
-    )
-    assert saved["saved"] and path.is_file() and path.stat().st_size > 0
-    await client.call(
-        "wps_documents", "close", component="et", document=saved["full_name"]
-    )
-    opened = await client.call(
-        "wps_documents", "open", component="et", file_path=str(path)
-    )
-    assert isinstance(opened["full_name"], str)
-    return opened["full_name"]
-
-
 def test_native_et_rules_validation_and_scoped_names(tmp_path: Path) -> None:
     async def scenario() -> None:
         async with native_client() as client:
@@ -192,8 +170,8 @@ def test_native_et_rules_validation_and_scoped_names(tmp_path: Path) -> None:
                 address="A3:B4",
             )
 
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "et-rules.xlsx"
+            identity = await client.save_and_reopen(
+                "et", identity, tmp_path / "et-rules.xlsx"
             )
             conditions = await client.call(
                 "wps_et_conditional_formats",
@@ -412,8 +390,8 @@ def test_native_et_pivot_layout_refresh_and_persistence(
                 pivot="SalesPivot",
             )
             assert refreshed["values"][-1][-1] == 35
-            identity = await save_and_reopen(
-                client, identity, tmp_path / "et-pivot.xlsx"
+            identity = await client.save_and_reopen(
+                "et", identity, tmp_path / "et-pivot.xlsx"
             )
             persisted = await client.call(
                 "wps_et_pivot_tables",
@@ -549,7 +527,7 @@ def test_native_et_structured_table_preserve_and_delete(
                 last_column=True,
             )
             path = tmp_path / "et-table.xlsx"
-            identity = await save_and_reopen(client, identity, path)
+            identity = await client.save_and_reopen("et", identity, path)
             persisted = await client.call(
                 "wps_et_tables",
                 "read",

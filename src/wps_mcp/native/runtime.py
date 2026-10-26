@@ -1,0 +1,149 @@
+"""Manage sessions and temporary resources for one service lifespan."""
+
+from __future__ import annotations
+
+import logging
+import sys
+from collections.abc import Callable
+from contextlib import ExitStack
+from contextvars import Token
+from functools import partial
+from threading import Lock, Thread
+from types import TracebackType
+
+from wps_mcp.errors import WpsError
+from wps_mcp.models import Component
+from wps_mcp.native.capabilities import get_capabilities
+from wps_mcp.native.components import SPECS
+from wps_mcp.native.context import CURRENT_RUNTIME
+from wps_mcp.native.session import ExecutionSession, LocalSession
+
+logger = logging.getLogger(__name__)
+
+
+class Runtime:
+    """Own the sessions and temporary resources of one service."""
+
+    def __init__(
+        self,
+        session_factory: Callable[[Component], ExecutionSession] | None = None,
+    ) -> None:
+        self.resources = ExitStack()
+        factory = session_factory or create_session
+        if (
+            session_factory is None
+            and get_capabilities(sys.platform).backend == "js"
+        ):
+            from wps_mcp.native.macos import MacExecutor, MacSession
+
+            executor = MacExecutor()
+            factory = partial(MacSession, executor=executor)
+        self.sessions = {component: factory(component) for component in SPECS}
+        self._lock = Lock()
+        self._closed = False
+        self._token: Token[Runtime | None] | None = None
+        self.cleanup_thread: Thread | None = None
+
+    def __enter__(self) -> Runtime:
+        if self._closed or self._token is not None:
+            raise WpsError("Runtime cannot be reused or entered twice")
+        self._token = CURRENT_RUNTIME.set(self)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        try:
+            self.close()
+        except Exception:
+            if exc is None:
+                raise
+            logger.exception(
+                "Runtime cleanup failed while handling an operation error"
+            )
+        finally:
+            if self._token is not None:
+                CURRENT_RUNTIME.reset(self._token)
+                self._token = None
+
+    def close(self) -> None:
+        """Stop sessions, retaining resources until native calls finish."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+        pending: list[ExecutionSession] = []
+        errors: list[str] = []
+        for session in self.sessions.values():
+            try:
+                if not session.close():
+                    pending.append(session)
+            except Exception as error:
+                errors.append(str(error))
+        if pending:
+            logger.warning(
+                "WPS calls are still running; temporary resources remain "
+                "owned until completion"
+            )
+
+            def finish() -> None:
+                try:
+                    for session in pending:
+                        try:
+                            session.wait()
+                            session.close()
+                        except Exception:
+                            logger.exception("Deferred WPS cleanup failed")
+                finally:
+                    try:
+                        self.resources.close()
+                    except Exception:
+                        logger.exception(
+                            "Deferred temporary resource cleanup failed"
+                        )
+
+            self.cleanup_thread = Thread(
+                target=finish, name="WPS cleanup", daemon=True
+            )
+            self.cleanup_thread.start()
+        else:
+            self.resources.close()
+        if errors:
+            raise WpsError("; ".join(errors))
+
+
+def get_runtime() -> Runtime:
+    """Return the runtime attached to the current service context."""
+    runtime = CURRENT_RUNTIME.get()
+    if runtime is None:
+        raise WpsError(
+            "WPS runtime is unavailable outside its service lifespan"
+        )
+    return runtime
+
+
+def create_session(component: Component) -> ExecutionSession:
+    """Select a lazy backend without importing its native dependencies."""
+    backend = get_capabilities(sys.platform).backend
+    if backend == "rpc":
+        from wps_mcp.native.process import ProcessSession
+
+        return ProcessSession(component)
+    if backend == "js":
+        from wps_mcp.native.macos import MacSession
+
+        return MacSession(component)
+    from wps_mcp.native.windows import ComSession
+
+    return ComSession(component)
+
+
+def get_session(component: Component) -> LocalSession:
+    """Access native objects only from a local backend execution context."""
+    session = get_runtime().sessions[component]
+    if not isinstance(session, LocalSession):
+        raise WpsError("Native objects are confined to the WPS worker process")
+    return session
