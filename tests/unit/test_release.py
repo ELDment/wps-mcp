@@ -69,7 +69,7 @@ def test_release_changes_metadata_without_rewriting_package_source(
     source = tmp_path / "src" / "wps_mcp" / "__init__.py"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"from importlib.metadata import version\r\n")
-    project.write_bytes(b'[project]\nname = "wps-mcp"\nversion = "1.1.0"\n')
+    project.write_bytes(b'[project]\nname = "wps-mcp"\nversion = "1.2.0"\n')
     lock.write_bytes(b"version = 1\n")
     run = Mock()
     monkeypatch.setattr(prepare_release.subprocess, "run", run)
