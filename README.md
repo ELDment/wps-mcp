@@ -30,8 +30,6 @@
 
 ## 功能与平台对比
 
-✅ 支持 · 部分：存在限制 · ❌ 不支持。具体条件见表下角标说明，实际可用性以当前 WPS 版本为准。
-
 | 组件 | 功能 | Windows | Linux | macOS |
 | --- | --- | :---: | :---: | :---: |
 | **通用** | 环境检测、组件连接与启动 | ✅ | ✅ | ✅ |
@@ -94,6 +92,7 @@
 | | 幻灯片图片与形状导出 | ✅ | ✅ | ✅ |
 | | 复制图片到剪贴板 | ✅ | ✅⁹ | ✅ |
 
+- **实际可用性以当前 WPS 版本为准。**
 - **¹** macOS：替换规则时保留可读颜色，无法保留不可读取的主题绑定
 - **²** macOS：颜色方案名称会变为 `WPS MCP`，未指定的颜色保留
 - **³** 需要联网。
@@ -118,9 +117,7 @@
 
 ### 2. 配置 MCP 客户端
 
-下面采用常见的 MCP JSON 配置格式。本文描述当前源码；已发布包的功能以安装版本为准，需要当前分支的功能时使用源码方式。
-
-#### 使用已发布版本
+#### MCP 配置
 
 Windows / macOS：
 
@@ -158,7 +155,7 @@ Linux 必须指定 CPython 3.11：
 "args": ["--no-config", "--python", "3.11", "--prerelease", "allow", "wps-mcp@latest"]
 ```
 
-##### 环境配置与故障排查
+#### 环境配置与故障排查
 
 <details>
 <summary>可选环境变量</summary>
@@ -253,9 +250,11 @@ env | grep -E '^(DISPLAY|XAUTHORITY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DBUS_SESSION
 
 </details>
 
-#### 使用本地源码
+### 本地开发
 
-下载或克隆仓库，在项目根目录安装依赖：
+<details>
+<summary>使用本地源码</summary>
+下载或克隆项目，在根目录安装依赖：
 
 ```sh
 # Windows / macOS
@@ -265,7 +264,7 @@ uv sync --locked
 uv sync --locked --python 3.11
 ```
 
-将下面的 `项目路径` 替换为仓库根目录（包含 `pyproject.toml` 的目录），例如 `d:/projects/wps-mcp` 或 `/home/user/projects/wps-mcp`。
+将下面的 `项目目录` 替换为项目根目录（包含 `pyproject.toml` 的目录），例如 `d:/projects/wps-mcp` 或 `/home/user/projects/wps-mcp`。
 
 Windows / macOS：
 
@@ -274,7 +273,7 @@ Windows / macOS：
   "mcpServers": {
     "wps": {
       "command": "uv",
-      "args": ["--directory", "项目路径", "run", "wps-mcp"]
+      "args": ["--directory", "项目目录", "run", "wps-mcp"]
     }
   }
 }
@@ -287,11 +286,13 @@ Linux：
   "mcpServers": {
     "wps": {
       "command": "uv",
-      "args": ["--directory", "项目路径", "run", "--python", "3.11", "wps-mcp"]
+      "args": ["--directory", "项目目录", "run", "--python", "3.11", "wps-mcp"]
     }
   }
 }
 ```
+
+</details>
 
 ---
 
