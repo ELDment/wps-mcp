@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
+from zipfile import ZipFile
 
 import anyio
 import pytest
@@ -39,6 +41,19 @@ def test_native_edit_save_reopen_and_preview(
                 assert isinstance(payload, dict)
                 return payload
 
+            detected = await invoke("wps_components", operation="detect")
+            assert any(
+                item["component"] == component
+                for item in detected["components"]
+            )
+            connected = await invoke(
+                "wps_components", operation="connect", component=component
+            )
+            assert connected["component"] == component
+            listed = await invoke(
+                "wps_documents", operation="list", component=component
+            )
+            assert isinstance(listed["documents"], list)
             created = await invoke(
                 "wps_documents", operation="create", component=component
             )
@@ -256,6 +271,46 @@ def test_native_edit_save_reopen_and_preview(
                 )
                 identity = saved["full_name"]
                 assert target.is_file() and saved["saved"]
+                if component == "writer":
+                    marker = "Unsaved native marker " + uuid4().hex
+                    await invoke(
+                        "wps_writer_text",
+                        operation="insert",
+                        document=identity,
+                        position=0,
+                        text=marker,
+                    )
+                    text = await invoke(
+                        "wps_writer_text", operation="read", document=identity
+                    )
+                    state = await invoke(
+                        "wps_documents",
+                        operation="info",
+                        component=component,
+                        document=identity,
+                    )
+                    assert marker in text["text"]
+                    assert state["saved"] is False
+                    with ZipFile(target) as archive:
+                        assert marker.encode() not in archive.read(
+                            "word/document.xml"
+                        )
+                    saved = await invoke(
+                        "wps_documents",
+                        operation="save",
+                        component=component,
+                        document=identity,
+                    )
+                    assert saved["saved"]
+                pdf = tmp_path / "document.pdf"
+                await invoke(
+                    "wps_documents",
+                    operation="export_pdf",
+                    component=component,
+                    document=identity,
+                    file_path=str(pdf),
+                )
+                assert pdf.read_bytes().startswith(b"%PDF")
                 preview = await server.call_tool(
                     "wps_documents",
                     {
@@ -282,6 +337,7 @@ def test_native_edit_save_reopen_and_preview(
                     operation="close",
                     component=component,
                     document=identity,
+                    save_changes=True,
                 )
                 identity = None
                 reopened = await invoke(

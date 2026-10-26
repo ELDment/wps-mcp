@@ -572,16 +572,18 @@ def test_odbc_text_driver_resolves_default_directory(
     native: MergeHarness,
 ) -> None:
     path = Path(native.source.Name)
+    password = "wps-test-password-must-not-leak"
     native.source.Name = ""
     native.source.ConnectString = (
         "DRIVER={Microsoft Text Driver (*.txt; *.csv)};\t\t"
-        f"DefaultDir={path.parent};UID=Admin;PWD=private;Extensions=txt,csv,tab"
+        f"DefaultDir={path.parent};UID=Admin;PWD={password};"
+        "Extensions=txt,csv,tab"
     )
     native.source.QueryString = "SELECT * FROM `records`"
     details = merge.source_details(native.source)
     assert details["file_path"] == str(path)
     assert details["record_count"] == 2
-    assert "private" not in str(details)
+    assert password not in str(details)
     assert "DRIVER" not in str(details)
 
 

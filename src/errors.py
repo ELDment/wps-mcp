@@ -20,6 +20,10 @@ class OperationTimeoutError(WpsError):
     """A queued operation was cancelled or a native call is unresolved."""
 
 
+class UnknownOutcomeError(WpsError):
+    """A native request may still be running; rollback is not yet safe."""
+
+
 class NativeError(WpsError):
     """A native API rejected a call, optionally with an HRESULT."""
 

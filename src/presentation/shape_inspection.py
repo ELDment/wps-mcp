@@ -213,24 +213,27 @@ def get_shape_info(params: ShapeIdentifierInput) -> JsonObject:
     except Exception:
         pass
     try:
-        cf = shape.ConnectorFormat
-        conn_info = {}
-        try:
-            if cf.BeginConnected:
-                conn_info["begin_connected_shape"] = (
-                    cf.BeginConnectedShape.Name
-                )
-                conn_info["begin_connection_site"] = cf.BeginConnectionSite
-        except Exception:
-            pass
-        try:
-            if cf.EndConnected:
-                conn_info["end_connected_shape"] = cf.EndConnectedShape.Name
-                conn_info["end_connection_site"] = cf.EndConnectionSite
-        except Exception:
-            pass
-        if conn_info:
-            info["connector_format"] = conn_info
+        if shape.Connector:
+            cf = shape.ConnectorFormat
+            conn_info = {}
+            try:
+                if cf.BeginConnected:
+                    conn_info["begin_connected_shape"] = (
+                        cf.BeginConnectedShape.Name
+                    )
+                    conn_info["begin_connection_site"] = cf.BeginConnectionSite
+            except Exception:
+                pass
+            try:
+                if cf.EndConnected:
+                    conn_info["end_connected_shape"] = (
+                        cf.EndConnectedShape.Name
+                    )
+                    conn_info["end_connection_site"] = cf.EndConnectionSite
+            except Exception:
+                pass
+            if conn_info:
+                info["connector_format"] = conn_info
     except Exception:
         pass
     try:

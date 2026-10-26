@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from src.common.files import (
     protect_existing_file,
@@ -25,6 +24,7 @@ from src.documents.models import (
 )
 from src.models import InputModel, JsonObject, NativeObject
 from src.native.discovery import detect_components as inspect_components
+from src.native.files import temporary_directory
 from src.native.runtime import get_session
 from src.native.selection import document_key
 from src.native.session import LocalSession
@@ -326,7 +326,7 @@ def export_pdf(params: ExportInput) -> JsonObject:
     session = get_session(params.component)
     document = session.get_document(params.document)
     path = destination(params.file_path, {".pdf"}, params.overwrite)
-    with TemporaryDirectory(
+    with temporary_directory(
         prefix="wps-export-", dir=path.parent
     ) as directory:
         staged = Path(directory) / "export.pdf"
@@ -339,7 +339,7 @@ def preview_document(params: PreviewInput) -> bytes:
     """Return a PNG of a WPS-rendered page; ET pages follow print layout."""
     session = get_session(params.component)
     document = session.get_document(params.document)
-    with TemporaryDirectory(prefix="wps-preview-") as directory:
+    with temporary_directory(prefix="wps-preview-") as directory:
         path = Path(directory) / "preview.pdf"
         export_pdf_to(session, document, path)
         return render_pdf_page(path, params.page_index, params.width)

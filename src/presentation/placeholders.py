@@ -8,6 +8,7 @@ from pydantic import Field, model_validator
 from src.common.colors import int_to_hex
 from src.common.text import normalize_text
 from src.models import DocumentInput, JsonObject, NativeObject
+from src.native.objects import optional_property
 from src.native.runtime import get_session
 from src.presentation.constants import (
     PLACEHOLDER_TYPE_NAMES,
@@ -428,11 +429,12 @@ def get_slide_master_info(params: DesignInput) -> JsonObject:
         logger.debug(
             "Optional native presentation property unavailable: %s", error
         )
+    has_title = optional_property(design, "HasTitleMaster")
     return {
         "success": True,
         "design_name": design.Name,
         "master_name": master.Name,
         "layout_count": master.CustomLayouts.Count,
-        "has_title_master": bool(design.HasTitleMaster),
+        "has_title_master": None if has_title is None else bool(has_title),
         "theme_colors": colors,
     }

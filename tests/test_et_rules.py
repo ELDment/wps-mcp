@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from src.errors import NativeError, WpsError
 from src.native.context import CALL_DOCUMENT
+from src.native.javascript import JsError
 from src.native.windows import ComSession
 from src.spreadsheet import conditional, formulas, models, validation
 from src.spreadsheet import names as defined_names
@@ -403,6 +404,70 @@ def test_conditional_linux_rgb_style_has_no_theme(
     assert "ThemeColor" not in snapshot["Font"]
 
 
+@pytest.mark.parametrize("member", ["ThemeColor", "PatternThemeColor"])
+def test_conditional_macos_rgb_style_has_no_theme(
+    conditional_replacement: tuple[Mock, Mock], member: str
+) -> None:
+    old, _ = conditional_replacement
+    native = old.Font if member == "ThemeColor" else old.Interior
+    setattr(
+        type(native),
+        member,
+        PropertyMock(
+            side_effect=JsError(
+                "get", member, NativeError("Error: Function excute faild")
+            )
+        ),
+    )
+    snapshot = conditional.condition_style(old)
+    style = snapshot["Font" if member == "ThemeColor" else "Interior"]
+    assert member not in style
+    if member == "ThemeColor":
+        assert style["Color"] == 0x123456
+    else:
+        assert style["PatternColorIndex"] == -4105
+
+
+@pytest.mark.parametrize("member", ["ThemeColor", "PatternThemeColor"])
+@pytest.mark.parametrize(
+    "mismatch", ["operation", "member", "detail", "hresult", "legacy_hresult"]
+)
+def test_conditional_macos_theme_failure_never_replaces_rule(
+    target: Mock,
+    conditional_replacement: tuple[Mock, Mock],
+    member: str,
+    mismatch: str,
+) -> None:
+    old, new = conditional_replacement
+    error = JsError(
+        "set" if mismatch == "operation" else "get",
+        "Color" if mismatch == "member" else member,
+        NativeError(
+            "Access denied"
+            if mismatch == "detail"
+            else "Error: Function excute faild",
+            {"hresult": -2147024891, "legacy_hresult": -2147483645}.get(
+                mismatch
+            ),
+        ),
+    )
+    native = old.Font if member == "ThemeColor" else old.Interior
+    setattr(type(native), member, PropertyMock(side_effect=error))
+    with pytest.raises(JsError) as caught:
+        conditional.update_conditional_format(
+            conditional.UpdateConditionalInput(
+                address="A1:B3",
+                index=2,
+                rule_type="expression",
+                formula1="=A1>1",
+            )
+        )
+    assert caught.value is error
+    target.FormatConditions.Add.assert_not_called()
+    old.Delete.assert_not_called()
+    new.Delete.assert_not_called()
+
+
 def test_conditional_update_changes_one_rule(
     target: Mock, conditional_replacement: tuple[Mock, Mock]
 ) -> None:
@@ -705,7 +770,11 @@ class WpsMissingValidationError(Exception):
 
 @pytest.mark.parametrize(
     "error",
-    [WpsMissingValidationError(), NativeError("No type", -2147483645)],
+    [
+        WpsMissingValidationError(),
+        NativeError("No type", -2147483645),
+        JsError("get", "Type", NativeError("Error: Function excute faild")),
+    ],
 )
 def test_wps_empty_validation_requires_independent_absence_check(
     target: Mock,
@@ -722,7 +791,14 @@ def test_wps_empty_validation_requires_independent_absence_check(
 
 
 @pytest.mark.parametrize(
-    "error", [MissingValidationError(), NativeError("No cells", -2146827284)]
+    "error",
+    [
+        MissingValidationError(),
+        NativeError("No cells", -2146827284),
+        JsError(
+            "call", "SpecialCells", NativeError("Error: Function excute faild")
+        ),
+    ],
 )
 def test_missing_validation_accepts_native_no_special_cells(
     target: Mock,
@@ -760,7 +836,11 @@ def test_missing_validation_ignores_special_cells_outside_target(
 
 @pytest.mark.parametrize(
     "error",
-    [WpsMissingValidationError(), NativeError("No type", -2147483645)],
+    [
+        WpsMissingValidationError(),
+        NativeError("No type", -2147483645),
+        JsError("get", "Type", NativeError("Error: Function excute faild")),
+    ],
 )
 def test_invalid_native_type_with_existing_rules_does_not_replace_them(
     target: Mock,
@@ -799,6 +879,46 @@ def test_special_cells_failure_is_not_misreported_as_absence(
         validation.read_validation(
             validation.ReadValidationInput(address="A1")
         )
+
+
+@pytest.mark.parametrize(
+    "operation,member", [("get", "Type"), ("call", "SpecialCells")]
+)
+@pytest.mark.parametrize(
+    "mismatch", ["operation", "member", "detail", "hresult", "legacy_hresult"]
+)
+def test_validation_macos_unrelated_failure_never_adds_rule(
+    target: Mock, operation: str, member: str, mismatch: str
+) -> None:
+    legacy = -2147483645 if member == "Type" else -2146827284
+    error = JsError(
+        "set" if mismatch == "operation" else operation,
+        "Count" if mismatch == "member" else member,
+        NativeError(
+            "Access denied"
+            if mismatch == "detail"
+            else "Error: Function excute faild",
+            {"hresult": -2147024891, "legacy_hresult": legacy}.get(mismatch),
+        ),
+    )
+    type(target.Validation).Type = PropertyMock(
+        side_effect=error
+        if member == "Type"
+        else JsError(
+            "get", "Type", NativeError("Error: Function excute faild")
+        )
+    )
+    target.SpecialCells.side_effect = error
+    with pytest.raises(JsError) as caught:
+        validation.set_validation(
+            validation.SetValidationInput(
+                address="A1:B3", validation_type="list", formula1="a,b"
+            )
+        )
+    assert caught.value is error
+    target.Validation.Add.assert_not_called()
+    target.Validation.Modify.assert_not_called()
+    target.Validation.Delete.assert_not_called()
 
 
 def test_validation_absent_adds_without_delete(target: Mock) -> None:

@@ -12,6 +12,7 @@ from pydantic import Field, model_validator
 
 from src.common.colors import hex_to_int
 from src.models import DocumentInput, JsonObject, NativeObject
+from src.native.objects import optional_property
 from src.native.runtime import get_session
 from src.presentation.constants import (
     AFTER_EFFECT_MAP,
@@ -456,10 +457,12 @@ def _animation_info(effect: NativeObject) -> JsonObject:
         ),
     ):
         try:
-            value = int(getattr(getattr(effect, owner), attribute))
-            result[key], result[key + "_name"] = (
-                value,
-                names.get(value, f"unknown({value})"),
+            value = optional_property(getattr(effect, owner), attribute)
+            result[key] = None if value is None else int(value)
+            result[key + "_name"] = (
+                None
+                if value is None
+                else names.get(int(value), f"unknown({value})")
             )
         except Exception:
             result[key], result[key + "_name"] = None, None

@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from src.errors import NativeError
 from src.models import JsonObject, NativeObject
+from src.native.objects import is_member_unavailable
 from src.protocol.definitions import (
     READ_ANNOTATIONS,
     WRITE_ANNOTATIONS,
@@ -126,7 +127,8 @@ def validation_type(target: NativeObject) -> int | None:
     except Exception as error:
         info = getattr(error, "excepinfo", None)
         if not (
-            (isinstance(error, NativeError) and error.hresult == -2147483645)
+            is_member_unavailable(error, "get", "Type")
+            or (type(error) is NativeError and error.hresult == -2147483645)
             or (
                 getattr(error, "hresult", None) == -2147352567
                 and isinstance(info, tuple)
@@ -140,13 +142,17 @@ def validation_type(target: NativeObject) -> int | None:
         except Exception as lookup_error:
             lookup_info = getattr(lookup_error, "excepinfo", None)
             if (
-                isinstance(lookup_error, NativeError)
-                and lookup_error.hresult == -2146827284
-            ) or (
-                getattr(lookup_error, "hresult", None) == -2147352567
-                and isinstance(lookup_info, tuple)
-                and len(lookup_info) > 5
-                and lookup_info[5] == -2146827284
+                is_member_unavailable(lookup_error, "call", "SpecialCells")
+                or (
+                    type(lookup_error) is NativeError
+                    and lookup_error.hresult == -2146827284
+                )
+                or (
+                    getattr(lookup_error, "hresult", None) == -2147352567
+                    and isinstance(lookup_info, tuple)
+                    and len(lookup_info) > 5
+                    and lookup_info[5] == -2146827284
+                )
             ):
                 return None
             raise

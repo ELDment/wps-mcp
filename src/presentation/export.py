@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from contextlib import ExitStack, closing
 from pathlib import Path, PureWindowsPath
-from tempfile import TemporaryDirectory
 from typing import Literal, Self
 
 import pypdfium2 as pdfium
@@ -15,6 +14,7 @@ from src.common.files import publish_file
 from src.common.rendering import RENDER_LOCK
 from src.models import DocumentInput, JsonObject, NativeObject
 from src.native.clipboard import copy_images, ensure_clipboard_available
+from src.native.files import temporary_directory
 from src.native.runtime import get_runtime, get_session
 from src.presentation.constants import (
     MSO_TRUE,
@@ -86,7 +86,7 @@ def export_shape(params: ExportShapeInput) -> JsonObject:
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     goto_slide(session.get_application(), params.slide_index)
-    with TemporaryDirectory(
+    with temporary_directory(
         prefix="wps_export_", dir=target.parent
     ) as directory:
         staged = Path(directory) / ("shape." + fmt_key)
@@ -266,7 +266,7 @@ def export_pdf(params: ExportPDFInput) -> JsonObject:
     if target.exists():
         raise FileExistsError(f"Refusing to replace existing file: {target}")
     target.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(
+    with temporary_directory(
         prefix="wps_export_", dir=target.parent
     ) as directory:
         rendered = Path(directory) / "presentation.pdf"
@@ -344,7 +344,7 @@ def export_images(params: ExportImagesInput) -> JsonObject:
         if path.exists():
             raise FileExistsError(f"Refusing to replace existing file: {path}")
     destination.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(
+    with temporary_directory(
         prefix="wps_export_", dir=destination
     ) as directory:
         staged = [Path(directory) / path.name for path in paths]
@@ -405,7 +405,7 @@ def copy_to_clipboard(params: CopyToClipboardInput) -> JsonObject:
         )
     with ExitStack() as resources:
         directory = resources.enter_context(
-            TemporaryDirectory(prefix="wps_clipboard_")
+            temporary_directory(prefix="wps_clipboard_")
         )
         paths = [Path(directory) / f"Slide{index}.png" for index in indices]
         for index, path in zip(indices, paths, strict=True):
@@ -448,8 +448,8 @@ def get_slide_preview(params: GetSlidePreviewInput) -> bytes:
             f"Slide index {params.slide_index} out "
             f"of range (1-{presentation.Slides.Count})"
         )
-    with TemporaryDirectory(prefix="wpp-preview-") as temporary_directory:
-        output_path = Path(temporary_directory) / "slide.png"
+    with temporary_directory(prefix="wpp-preview-") as directory:
+        output_path = Path(directory) / "slide.png"
         presentation.Slides(params.slide_index).Export(str(output_path), "PNG")
         with output_path.open("rb") as image_file:
             image_data = image_file.read()

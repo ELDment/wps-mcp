@@ -7,6 +7,7 @@ from pydantic import Field, model_validator
 from src.common.colors import hex_to_int, int_to_hex
 from src.errors import NativeError, WpsError
 from src.models import Color, JsonObject, NativeObject
+from src.native.objects import is_member_unavailable, optional_property
 from src.protocol.definitions import (
     READ_ANNOTATIONS,
     WRITE_ANNOTATIONS,
@@ -173,17 +174,21 @@ def condition_style(rule: NativeObject) -> dict[str, JsonObject]:
             color = getattr(native, prefix + "Color")
             theme = None
             try:
-                theme = getattr(native, prefix + "ThemeColor")
+                theme = optional_property(native, prefix + "ThemeColor")
             except Exception as error:
                 info = getattr(error, "excepinfo", None)
                 missing_theme = (
-                    isinstance(error, NativeError)
-                    and error.hresult == -2147483645
-                ) or (
-                    getattr(error, "hresult", None) == -2147352567
-                    and isinstance(info, tuple)
-                    and len(info) > 5
-                    and info[5] in {-2146827284, -2147024809}
+                    is_member_unavailable(error, "get", prefix + "ThemeColor")
+                    or (
+                        type(error) is NativeError
+                        and error.hresult == -2147483645
+                    )
+                    or (
+                        getattr(error, "hresult", None) == -2147352567
+                        and isinstance(info, tuple)
+                        and len(info) > 5
+                        and info[5] in {-2146827284, -2147024809}
+                    )
                 )
                 if not missing_theme:
                     raise

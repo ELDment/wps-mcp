@@ -9,6 +9,7 @@ from shutil import copy2
 from tempfile import NamedTemporaryFile
 from zipfile import ZipFile
 
+from src.errors import UnknownOutcomeError
 from src.models import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,8 @@ def protect_existing_file(
 
     COM state can already have changed when a call fails. If restoring the file
     is blocked by WPS or the filesystem, retain a named recovery copy.
+    An unknown native outcome leaves the destination untouched and retains
+    the recovery copy until the user can confirm native work has finished.
 
     Default SaveAs reserves a new pathname exclusively before suppressing WPS
     alerts. The reservation is closed so WPS can replace it; this does not lock
@@ -78,6 +81,21 @@ def protect_existing_file(
             copy2(path, backup)
         try:
             yield
+        except UnknownOutcomeError as error:
+            retain_backup = True
+            recovery = (
+                f"Original bytes are preserved at {backup}. "
+                if backup is not None
+                else ""
+            )
+            raise UnknownOutcomeError(
+                "WPS save outcome is unknown; native work may still be "
+                "running. The destination was not rolled back or removed: "
+                f"{path}. {recovery}"
+                "Wait for WPS to finish and inspect the document before "
+                "restoring any recovery copy or retrying. "
+                f"Detail: {error}"
+            ) from error
         except Exception as error:
             if backup is not None:
                 try:

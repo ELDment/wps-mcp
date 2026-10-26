@@ -5,6 +5,7 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 
 from src.models import DocumentInput, JsonObject, NativeObject
+from src.native.objects import require_feature
 from src.native.runtime import get_session
 from src.native.state import temporary_attributes
 from src.presentation.constants import (
@@ -52,10 +53,17 @@ class SlideShowGotoInput(DocumentInput):
     slide_index: int = Field(ge=1)
 
 
+def _show_presentation() -> NativeObject:
+    """Require a reliable native show lifecycle before any playback action."""
+    presentation = get_session("wpp").get_document()
+    require_feature(presentation, "slideshow")
+    return presentation
+
+
 def _show_window(required: bool = True) -> NativeObject:
     """Find the slide show belonging to the target deck."""
     session = get_session("wpp")
-    presentation = session.get_document()
+    presentation = _show_presentation()
     windows = session.get_application().SlideShowWindows
     for index in range(1, windows.Count + 1):
         window = windows(index)
@@ -76,7 +84,7 @@ def _show_window(required: bool = True) -> NativeObject:
 )
 def slideshow_start(params: SlideShowStartInput) -> JsonObject:
     """Start a show and restore its stored settings afterwards."""
-    presentation = get_session("wpp").get_document()
+    presentation = _show_presentation()
     total = presentation.Slides.Count
     start, end = params.start_slide or 1, params.end_slide or total
     if not 1 <= start <= end <= total:

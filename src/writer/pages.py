@@ -226,6 +226,8 @@ def write_header_footer(params: WriteHeaderFooterInput) -> JsonObject:
         section.PageSetup.DifferentFirstPageHeaderFooter = -1
     if params.variant == "even_pages":
         section.PageSetup.OddAndEvenPagesHeaderFooter = -1
+    # Enabling a variant can replace its native header/footer object.
+    _, item = resolve_header_footer(document, params)
     if params.section_index > 1:
         item.LinkToPrevious = params.link_to_previous
     item.Range.Text = params.text

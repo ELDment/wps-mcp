@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Literal, Self
@@ -16,6 +15,7 @@ from src.documents.models import CloseInput, ExportInput, SaveInput
 from src.documents.service import close_document, export_pdf, save_document
 from src.models import DocumentInput, InputModel, JsonObject, NativeObject
 from src.native.context import CALL_DOCUMENT
+from src.native.discovery import template_directory
 from src.native.runtime import get_session
 from src.presentation.constants import (
     MSO_FALSE,
@@ -600,44 +600,12 @@ def activate_presentation(params: PresentationInput) -> JsonObject:
 )
 def list_templates(params: ListTemplatesInput) -> JsonObject:
     """List local WPS and PowerPoint templates without WPS."""
-    directory = params.templates_dir
-    if directory is None:
-        candidates = [os.environ.get("WPS_TEMPLATES_DIR")]
-        app_data = os.environ.get("APPDATA")
-        if app_data and sys.platform == "win32":
-            candidates.append(
-                str(Path(app_data) / "kingsoft" / "office6" / "templates")
-            )
-        if sys.platform == "linux":
-            data_home = os.environ.get("XDG_DATA_HOME")
-            data_root = (
-                Path(data_home)
-                if data_home and Path(data_home).is_absolute()
-                else Path.home() / ".local" / "share"
-            )
-            candidates.append(
-                str(data_root / "Kingsoft" / "office6" / "templates")
-            )
-            candidates.append("/opt/kingsoft/wps-office/templates")
-        directory = next(
-            (
-                candidate
-                for candidate in candidates
-                if candidate and Path(candidate).is_dir()
-            ),
-            None,
-        )
-    if directory is None:
-        raise FileNotFoundError(
-            "No templates directory found; specify templates_dir"
-        )
-    root = Path(directory).resolve()
-    if not root.is_dir():
-        raise NotADirectoryError(f"Templates directory not found: {root}")
+    root, bundled = template_directory(params.templates_dir)
+    paths = root.glob("*/templates/**/*") if bundled else root.iterdir()
     templates = [
         {"name": path.stem, "file_name": path.name, "file_path": str(path)}
         for path in sorted(
-            root.iterdir(), key=lambda path: path.name.casefold()
+            paths, key=lambda path: (path.name.casefold(), str(path))
         )
         if path.is_file()
         and path.suffix.lower() in {".dpt", ".potx", ".potm", ".pot"}

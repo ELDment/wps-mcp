@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from src.models import DocumentInput, JsonObject, NativeObject
+from src.native.objects import require_feature
 from src.native.runtime import get_session
 from src.presentation.constants import (
     MSO_ARROWHEAD_DIAMOND,
@@ -89,6 +90,7 @@ def resolve_site(shape: NativeObject, site: ConnectionSite) -> int:
                 f"Shape '{shape.Name}' has {count} connection sites."
             )
         return site
+    require_feature(shape, "connection_sites")
     sites = shape.ConnectionSites
     count = int(sites.Count)
     if not count:

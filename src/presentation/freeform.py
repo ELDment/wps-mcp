@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from src.models import DocumentInput, InputModel, JsonObject, NativeObject
+from src.native.objects import require_feature, supports_feature
 from src.native.runtime import get_session
 from src.presentation.constants import (
     EDITING_TYPE_MAP,
@@ -143,6 +144,7 @@ def resolve_freeform(
     shape = resolve_shape(slide, reference)
     if shape.Type != MSO_FREEFORM:
         raise ValueError(f"Shape '{shape.Name}' is not a freeform.")
+    require_feature(shape, "freeform_nodes")
     if node_index is not None and node_index > shape.Nodes.Count:
         raise ValueError(
             f"Node {node_index} exceeds {shape.Nodes.Count} nodes."
@@ -160,19 +162,32 @@ def build_freeform(params: BuildFreeformInput) -> JsonObject:
     """
     session = get_session("wpp")
     slide = session.get_document().Slides(params.slide_index)
-    goto_slide(session.get_application(), params.slide_index)
-    builder = slide.Shapes.BuildFreeform(
-        EDITING_TYPE_MAP[params.start_editing_type],
-        params.start_x,
-        params.start_y,
-    )
-    for node in params.nodes:
-        builder.AddNodes(*node.native_arguments())
-    if params.close_path:
-        builder.AddNodes(
-            MSO_SEGMENT_LINE, MSO_EDITING_AUTO, params.start_x, params.start_y
+    if not supports_feature(slide, "freeform_builder"):
+        if any(node.segment_type != "line" for node in params.nodes):
+            require_feature(slide, "freeform_builder")
+        goto_slide(session.get_application(), params.slide_index)
+        points = [[params.start_x, params.start_y]]
+        points.extend([node.x1, node.y1] for node in params.nodes)
+        if params.close_path and points[-1] != points[0]:
+            points.append(points[0])
+        shape = slide.Shapes.AddPolyline(points)
+    else:
+        goto_slide(session.get_application(), params.slide_index)
+        builder = slide.Shapes.BuildFreeform(
+            EDITING_TYPE_MAP[params.start_editing_type],
+            params.start_x,
+            params.start_y,
         )
-    shape = builder.ConvertToShape()
+        for node in params.nodes:
+            builder.AddNodes(*node.native_arguments())
+        if params.close_path:
+            builder.AddNodes(
+                MSO_SEGMENT_LINE,
+                MSO_EDITING_AUTO,
+                params.start_x,
+                params.start_y,
+            )
+        shape = builder.ConvertToShape()
     if params.shape_name is not None:
         shape.Name = params.shape_name
     return {

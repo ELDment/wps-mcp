@@ -36,6 +36,22 @@ PACKAGE = Path(__file__).resolve().parents[1] / "src"
         ),
         ("documents/service.py", ("mcp", "src.protocol")),
         (
+            "documents",
+            ("src.native.javascript", "src.native.macos", "src.native.rpc"),
+        ),
+        (
+            "writer",
+            ("src.native.javascript", "src.native.macos", "src.native.rpc"),
+        ),
+        (
+            "spreadsheet",
+            ("src.native.javascript", "src.native.macos", "src.native.rpc"),
+        ),
+        (
+            "presentation",
+            ("src.native.javascript", "src.native.macos", "src.native.rpc"),
+        ),
+        (
             "protocol/definitions.py",
             ("mcp", "src.native", "src.documents"),
         ),

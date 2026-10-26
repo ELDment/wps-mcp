@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import colorsys
 from pathlib import Path
+from xml.etree.ElementTree import Element, SubElement, tostring
 
 from pydantic import Field
 
 from src.common.colors import THEME_COLOR_MAP, hex_to_int, int_to_hex
 from src.models import DocumentInput, JsonObject, NativeObject
+from src.native.files import temporary_directory
+from src.native.objects import supports_feature
 from src.native.runtime import get_session
 from src.presentation.constants import (
     MSO_FALSE,
@@ -484,6 +487,43 @@ def get_theme_colors(params: GetThemeColorsInput) -> JsonObject:
     }
 
 
+def _load_theme_colors(scheme: NativeObject, colors: dict[int, int]) -> None:
+    """Import a native color scheme where the RGB setter is unavailable."""
+    tags = (
+        "dk1",
+        "lt1",
+        "dk2",
+        "lt2",
+        "accent1",
+        "accent2",
+        "accent3",
+        "accent4",
+        "accent5",
+        "accent6",
+        "hlink",
+        "folHlink",
+    )
+    root = Element(
+        "a:clrScheme",
+        {
+            "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+            "name": "WPS MCP",
+        },
+    )
+    for slot, tag in enumerate(tags, 1):
+        color = colors[slot] if slot in colors else scheme(slot).RGB
+        node = SubElement(root, f"a:{tag}")
+        SubElement(node, "a:srgbClr", val=int_to_hex(color).lstrip("#"))
+    with temporary_directory(prefix="wps-theme-") as directory:
+        path = Path(directory) / "colors.xml"
+        path.write_bytes(
+            tostring(root, encoding="utf-8", xml_declaration=True)
+        )
+        scheme.Load(str(path))
+    if any(scheme(slot).RGB != value for slot, value in colors.items()):
+        raise RuntimeError("WPS theme colors differ after native Load")
+
+
 @tool("wps_ppt_themes", component="wpp", operation="set_colors")
 def set_theme_colors(params: SetThemeColorsInput) -> JsonObject:
     """Apply validated colors to every slide master.
@@ -519,8 +559,11 @@ def set_theme_colors(params: SetThemeColorsInput) -> JsonObject:
         raise ValueError("The presentation has no slide designs")
     for index in range(1, design_count + 1):
         scheme = presentation.Designs(index).SlideMaster.Theme.ThemeColorScheme
-        for slot, value in colors.items():
-            scheme(slot).RGB = value
+        if not supports_feature(scheme, "theme_color_assignment"):
+            _load_theme_colors(scheme, colors)
+        else:
+            for slot, value in colors.items():
+                scheme(slot).RGB = value
     changed = [
         {"name": THEME_COLOR_NAMES[slot], "color_hex": int_to_hex(value)}
         for slot, value in colors.items()

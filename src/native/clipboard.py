@@ -17,6 +17,29 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+MACOS_SCRIPT = """
+ObjC.import('AppKit');
+function run(paths) {
+    var items;
+    if (paths.length === 1) {
+        var data = $.NSData.dataWithContentsOfFile($(paths[0]));
+        if (data.isNil()) throw new Error('Cannot read clipboard image');
+        var item = $.NSPasteboardItem.alloc.init;
+        if (!item.setDataForType(data, $.NSPasteboardTypePNG))
+            throw new Error('Cannot prepare clipboard image');
+        items = [item];
+    } else {
+        items = paths.map(function(path) {
+            return $.NSURL.fileURLWithPath($(path));
+        });
+    }
+    var pasteboard = $.NSPasteboard.generalPasteboard;
+    pasteboard.clearContents;
+    if (!pasteboard.writeObjects($(items)))
+        throw new Error('Cannot write clipboard');
+}
+"""
+
 
 def _linux_command(mime_type: str) -> list[str]:
     """Choose the native clipboard transport for the active desktop."""
@@ -50,6 +73,9 @@ def ensure_clipboard_available() -> None:
         import_module("win32clipboard")
     elif sys.platform == "linux":
         _linux_command("image/png")
+    elif sys.platform == "darwin":
+        if not os.access("/usr/bin/osascript", os.X_OK):
+            raise NotImplementedError("macOS clipboard requires osascript")
     else:
         raise NotImplementedError(
             f"Clipboard export is unsupported on {sys.platform}"
@@ -111,17 +137,31 @@ def copy_images(paths: Sequence[Path]) -> str:
     ensure_clipboard_available()
     if sys.platform == "win32":
         return _copy_windows(paths)
-    if len(paths) == 1:
-        mime_type = "image/png"
-        payload = paths[0].read_bytes()
+    if sys.platform == "darwin":
+        mime_type = "public.png" if len(paths) == 1 else "public.file-url"
+        command = [
+            "/usr/bin/osascript",
+            "-l",
+            "JavaScript",
+            "-e",
+            MACOS_SCRIPT,
+            "--",
+            *(str(path.resolve()) for path in paths),
+        ]
+        payload = None
     else:
-        mime_type = "text/uri-list"
-        payload = (
-            "\r\n".join(path.resolve().as_uri() for path in paths) + "\r\n"
-        ).encode("utf-8")
+        if len(paths) == 1:
+            mime_type = "image/png"
+            payload = paths[0].read_bytes()
+        else:
+            mime_type = "text/uri-list"
+            payload = (
+                "\r\n".join(path.resolve().as_uri() for path in paths) + "\r\n"
+            ).encode("utf-8")
+        command = _linux_command(mime_type)
     try:
         subprocess.run(
-            _linux_command(mime_type),
+            command,
             input=payload,
             check=True,
             timeout=10,

@@ -1,7 +1,7 @@
 """Behavior checks for drawing preflight and shared native style."""
 
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, PropertyMock
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +12,7 @@ from src.presentation import (
     freeform,
     layout,
     shape_formatting,
+    shape_inspection,
     style,
 )
 
@@ -325,3 +326,41 @@ def test_background_rejects_ambiguous_slide_selection(
             slide_index=1, slide_indices=[2], fill_type="master"
         )
     drawing_session.get_document.assert_not_called()
+
+
+def test_regular_shape_inspection_never_queries_connector_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shape = Mock(
+        Name="Rectangle",
+        Id=1,
+        Type=1,
+        Left=0,
+        Top=0,
+        Width=100,
+        Height=50,
+        Rotation=0,
+        ZOrderPosition=1,
+        Connector=False,
+        HasTextFrame=False,
+        LockAspectRatio=0,
+    )
+    forbidden = PropertyMock(side_effect=AssertionError("unsafe getter"))
+    type(shape).ConnectorFormat = forbidden
+    session = Mock()
+    slide = session.get_document.return_value.Slides.return_value
+    slide.TimeLine.MainSequence.Count = 0
+    shape.Adjustments.Count = 0
+    monkeypatch.setattr(
+        shape_inspection, "get_session", Mock(return_value=session)
+    )
+    monkeypatch.setattr(
+        shape_inspection, "resolve_shape", Mock(return_value=shape)
+    )
+    result = shape_inspection.get_shape_info(
+        shape_inspection.ShapeIdentifierInput(
+            slide_index=1, shape_name="Rectangle"
+        )
+    )
+    assert result["name"] == "Rectangle"
+    forbidden.assert_not_called()

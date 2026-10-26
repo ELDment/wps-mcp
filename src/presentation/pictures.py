@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import tempfile
 import threading
 import time
 import urllib.error
@@ -19,6 +18,8 @@ from pydantic import Field, model_validator
 
 from src.common.colors import hex_to_int, int_to_hex
 from src.models import DocumentInput, InputModel, JsonObject, NativeObject
+from src.native.files import temporary_directory
+from src.native.objects import optional_property
 from src.native.runtime import get_session
 from src.native.state import temporary_attributes
 from src.presentation.constants import (
@@ -136,7 +137,7 @@ def _insert_picture(
     zorder: str,
 ) -> JsonObject:
     """Embed downloaded image bytes while the temporary file is alive."""
-    with tempfile.TemporaryDirectory(prefix="wps-image-") as directory:
+    with temporary_directory(prefix="wps-image-") as directory:
         path = Path(directory) / ("image" + suffix)
         with path.open("wb") as stream:
             stream.write(data)
@@ -585,6 +586,7 @@ def set_picture_format(params: SetPictureFormatInput) -> JsonObject:
         pf.TransparentBackground = (
             MSO_TRUE if params.transparent_background else MSO_FALSE
         )
+    transparency = optional_property(pf, "TransparencyColor")
     cur_color_type = pf.ColorType
     color_type_name = PICTURE_COLOR_TYPE_NAMES.get(cur_color_type, "unknown")
     result = {
@@ -595,7 +597,9 @@ def set_picture_format(params: SetPictureFormatInput) -> JsonObject:
         "color_type": cur_color_type,
         "color_type_name": color_type_name,
         "transparent_background": bool(pf.TransparentBackground),
-        "transparent_color_hex": int_to_hex(pf.TransparencyColor),
+        "transparent_color_hex": (
+            None if transparency is None else int_to_hex(transparency)
+        ),
     }
     return result
 

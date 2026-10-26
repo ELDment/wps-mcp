@@ -12,6 +12,7 @@ from pydantic import Field
 from src.common.colors import hex_to_int
 from src.common.text import font_size_warning
 from src.models import DocumentInput, InputModel, JsonObject, NativeObject
+from src.native.objects import require_feature, supports_feature
 from src.native.runtime import get_session
 from src.presentation.constants import MSO_FALSE, MSO_SMART_ART, MSO_TRUE
 from src.presentation.shape_lookup import resolve_shape as _get_shape
@@ -261,6 +262,16 @@ def add_smartart(params: AddSmartArtInput) -> JsonObject:
     """Create SmartArt and populate every requested node."""
     app = get_session("wpp").get_application()
     pres = get_session("wpp").get_document()
+    if params.node_texts or any(
+        value is not None
+        for value in (
+            params.font_name,
+            params.font_size,
+            params.bold,
+            params.font_color,
+        )
+    ):
+        require_feature(pres, "smartart_nodes")
     slide = pres.Slides(params.slide_index)
     if params.layout_name:
         layout = _resolve_layout(app, params.layout_name)
@@ -308,7 +319,11 @@ def add_smartart(params: AddSmartArtInput) -> JsonObject:
     result = {
         "success": True,
         "shape_name": shape.Name,
-        "node_count": smart_art.AllNodes.Count,
+        "node_count": (
+            None
+            if not supports_feature(smart_art, "smartart_nodes")
+            else smart_art.AllNodes.Count
+        ),
         "layout_name": resolved_layout_name,
     }
     warn = font_size_warning(params.font_size)
@@ -332,6 +347,12 @@ def modify_smartart(params: ModifySmartArtInput) -> JsonObject:
     if shape.Type != MSO_SMART_ART:
         raise ValueError(f"Shape '{shape.Name}' is not a SmartArt graphic")
     smart_art = shape.SmartArt
+    if params.node_index is not None or params.action not in {
+        "change_layout",
+        "change_color",
+        "change_style",
+    }:
+        require_feature(smart_art, "smartart_nodes")
     if (
         params.node_index is not None
         and params.node_index > smart_art.AllNodes.Count
@@ -418,7 +439,11 @@ def modify_smartart(params: ModifySmartArtInput) -> JsonObject:
     result = {
         "success": True,
         "action": params.action,
-        "total_nodes": smart_art.AllNodes.Count,
+        "total_nodes": (
+            None
+            if not supports_feature(smart_art, "smartart_nodes")
+            else smart_art.AllNodes.Count
+        ),
     }
     warn = font_size_warning(params.font_size)
     if warn:

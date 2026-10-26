@@ -16,6 +16,7 @@ from src.errors import (
     DocumentNotFoundError,
     NativeError,
     OperationTimeoutError,
+    UnknownOutcomeError,
     WpsError,
     WpsUnavailableError,
 )
@@ -142,6 +143,7 @@ class StaWorker:
                                 WpsUnavailableError,
                                 DocumentNotFoundError,
                                 OperationTimeoutError,
+                                UnknownOutcomeError,
                             ):
                                 error_type = type(error)
                             elif isinstance(error, ValueError):

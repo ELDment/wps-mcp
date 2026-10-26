@@ -10,7 +10,7 @@ from unittest.mock import Mock
 import pytest
 
 from src.errors import WpsUnavailableError
-from src.native import discovery, linux
+from src.native import discovery, linux, macos
 
 
 @pytest.fixture
@@ -138,10 +138,93 @@ def test_missing_component_does_not_report_ready(linux_office: Path) -> None:
 def test_unsupported_platform_reports_no_ready_components(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(discovery, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(
+        discovery, "sys", SimpleNamespace(platform="unsupported")
+    )
     result = discovery.detect_components()
     assert not any(item["ready"] for item in result["components"])
     assert all(item["issues"] for item in result["components"])
+
+
+@pytest.fixture
+def macos_office(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    monkeypatch.setattr(discovery, "sys", SimpleNamespace(platform="darwin"))
+    bundle = tmp_path / "wpsoffice.app"
+    executable = bundle / "Contents/MacOS/wpsoffice"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"native executable placeholder")
+    executable.chmod(0o700)
+    for name in (
+        "wpsdriverlocal",
+        "wpsdriverbase",
+        "wpsdriverkso",
+        "wpsdriverwps",
+        "wpsdriveret",
+        "wpsdriverwpp",
+    ):
+        library = (
+            bundle / f"Contents/Frameworks/office6/{name}.framework/{name}"
+        )
+        library.parent.mkdir(parents=True)
+        library.write_bytes(b"native library placeholder")
+    monkeypatch.setattr(discovery, "application_bundle", lambda: bundle)
+    monkeypatch.setattr(
+        discovery, "driver_directory", lambda: tmp_path / "container"
+    )
+    monkeypatch.setattr(discovery, "discover_sockets", Mock(return_value=[]))
+    return bundle
+
+
+def test_macos_discovery_is_ready_without_running_wps(
+    monkeypatch: pytest.MonkeyPatch, macos_office: Path
+) -> None:
+    launch = Mock(side_effect=AssertionError("discovery must not launch WPS"))
+    execute = Mock(side_effect=AssertionError("discovery must not execute JS"))
+    monkeypatch.setattr(macos.subprocess, "run", launch)
+    monkeypatch.setattr(macos.MacDriver, "execute", execute)
+    result = discovery.detect_components()
+    assert result["backend"] == "js"
+    assert result["application"] == str(macos_office)
+    assert result["editor_sockets"] == []
+    for item in result["components"]:
+        assert item["registered"] is True
+        assert item["ready"] is True
+        assert item["issues"] == []
+        assert item["native_execution_verified"] is False
+        assert item["prog_id"] is None
+    launch.assert_not_called()
+    execute.assert_not_called()
+
+
+def test_macos_discovery_reports_component_specific_missing_driver(
+    macos_office: Path,
+) -> None:
+    (
+        macos_office
+        / "Contents/Frameworks/office6/wpsdriveret.framework/wpsdriveret"
+    ).unlink()
+    result = discovery.detect_components()
+    components = {item["component"]: item for item in result["components"]}
+    assert components["et"]["registered"] is True
+    assert components["et"]["ready"] is False
+    assert "wpsdriveret" in components["et"]["issues"][0]
+    assert components["writer"]["ready"] is True
+    assert components["wpp"]["ready"] is True
+
+
+def test_macos_discovery_separates_socket_presence_from_installation(
+    monkeypatch: pytest.MonkeyPatch, macos_office: Path
+) -> None:
+    path = macos_office.parent / "container/wpsdriverlocal_wps_1"
+    monkeypatch.setattr(
+        discovery, "discover_sockets", Mock(return_value=[path])
+    )
+    monkeypatch.setattr(discovery, "application_bundle", lambda: None)
+    result = discovery.detect_components()
+    assert result["editor_sockets"] == [str(path)]
+    assert result["application"] is None
+    assert not any(item["registered"] for item in result["components"])
+    assert not any(item["ready"] for item in result["components"])
 
 
 def test_private_profile_changes_only_its_copy(

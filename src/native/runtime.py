@@ -7,6 +7,7 @@ import sys
 from collections.abc import Callable
 from contextlib import ExitStack
 from contextvars import Token
+from functools import partial
 from threading import Lock, Thread
 from types import TracebackType
 
@@ -28,6 +29,11 @@ class Runtime:
     ) -> None:
         self.resources = ExitStack()
         factory = session_factory or create_session
+        if session_factory is None and sys.platform == "darwin":
+            from src.native.macos import MacExecutor, MacSession
+
+            executor = MacExecutor()
+            factory = partial(MacSession, executor=executor)
         self.sessions = {component: factory(component) for component in SPECS}
         self._lock = Lock()
         self._closed = False
@@ -121,6 +127,10 @@ def create_session(component: Component) -> ExecutionSession:
         from src.native.process import ProcessSession
 
         return ProcessSession(component)
+    if sys.platform == "darwin":
+        from src.native.macos import MacSession
+
+        return MacSession(component)
     from src.native.windows import ComSession
 
     return ComSession(component)

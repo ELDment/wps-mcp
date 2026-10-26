@@ -1,10 +1,12 @@
 """Inspect and manage native Writer styles and inheritance."""
 
+from types import SimpleNamespace
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
 from src.models import DocumentInput, JsonObject, NativeObject
+from src.native.objects import read_collection
 from src.native.runtime import get_session
 from src.protocol.definitions import (
     READ_ANNOTATIONS,
@@ -235,8 +237,10 @@ def list_styles(params: ListStylesInput) -> JsonObject:
     document = get_session("writer").get_document(params.document)
     styles = document.Styles
     result = []
-    for index in range(1, int(styles.Count) + 1):
-        details = style_details(document, styles.Item(index))
+    for item in read_collection(
+        styles, ("Type", "NameLocal", "BuiltIn", "InUse")
+    ):
+        details = style_details(document, SimpleNamespace(**item))
         if (
             (params.kind is None or details["kind"] == params.kind)
             and (

@@ -5,6 +5,7 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 
 from src.models import DocumentInput, JsonObject
+from src.native.objects import supports_feature
 from src.native.runtime import get_session
 from src.protocol.definitions import tool
 
@@ -108,9 +109,8 @@ def list_sections(params: DocumentInput) -> JsonObject:
 )
 def manage_section(params: ManageSectionInput) -> JsonObject:
     """Rename, move or remove a section while retaining slides."""
-    sections = (
-        get_session("wpp").get_document(params.document).SectionProperties
-    )
+    presentation = get_session("wpp").get_document(params.document)
+    sections = presentation.SectionProperties
     if params.section_index > sections.Count:
         raise ValueError(f"Section index out of range (1-{sections.Count})")
     result: JsonObject = {
@@ -133,5 +133,21 @@ def manage_section(params: ManageSectionInput) -> JsonObject:
         result["moved_to"] = params.move_to_index
     else:
         result["deleted_section"] = sections.Name(params.section_index)
-        sections.Delete(params.section_index, False)
+        if (
+            not supports_feature(sections, "delete_first_section")
+            and params.section_index == 1
+            and sections.Count > 1
+        ):
+            slides = presentation.Slides
+            identities = [
+                slides(index).SlideID for index in range(1, slides.Count + 1)
+            ]
+            sections.Move(1, 2)
+            try:
+                sections.Delete(2, False)
+            finally:
+                for index, identity in enumerate(identities, 1):
+                    slides.FindBySlideID(identity).MoveTo(index)
+        else:
+            sections.Delete(params.section_index, False)
     return result

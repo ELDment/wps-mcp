@@ -240,7 +240,7 @@ def test_rpc_chart_activation_is_not_repeated_while_series_initialize(
     )
     monkeypatch.setattr(charts, "_read_chart_series", reader)
     monkeypatch.setattr(charts.time, "sleep", Mock())
-    assert charts._read_rpc_chart(chart) == expected
+    assert charts._read_external_chart(chart) == expected
     chart.ChartData.Activate.assert_called_once_with()
     assert reader.call_count == 2
 
@@ -253,7 +253,7 @@ def test_rpc_chart_other_errors_are_not_retried(
     reader = Mock(side_effect=NativeError("disconnected", -2147483640))
     monkeypatch.setattr(charts, "_read_chart_series", reader)
     with pytest.raises(NativeError, match="disconnected"):
-        charts._read_rpc_chart(chart)
+        charts._read_external_chart(chart)
     reader.assert_called_once_with(chart)
 
 
@@ -265,7 +265,7 @@ def test_rpc_chart_read_does_not_request_an_unavailable_workbook(
     monkeypatch.setattr(charts, "_get_chart_shape", Mock(return_value=shape))
     reader = Mock(return_value=(["A"], [{"name": "Sales", "values": [7.0]}]))
     workbook = Mock(side_effect=AssertionError("Workbook must not be queried"))
-    monkeypatch.setattr(charts, "_read_rpc_chart", reader)
+    monkeypatch.setattr(charts, "_read_external_chart", reader)
     monkeypatch.setattr(charts, "chart_workbook", workbook)
     result = charts.get_chart_data(
         charts.GetChartDataInput(slide_index=1, shape_name_or_index="Chart 1")
@@ -287,7 +287,7 @@ def test_rpc_chart_add_verifies_series_without_owning_the_data_editor(
     workbook = Mock(side_effect=AssertionError("Workbook must not be queried"))
     monkeypatch.setattr(charts, "get_session", lambda component: session)
     monkeypatch.setattr(charts, "goto_slide", Mock())
-    monkeypatch.setattr(charts, "_read_rpc_chart", reader)
+    monkeypatch.setattr(charts, "_read_external_chart", reader)
     monkeypatch.setattr(charts, "chart_workbook", workbook)
     result = charts.add_chart(charts.AddChartInput(slide_index=1))
     assert result["success"] and result["shape_name"] == "Chart 1"

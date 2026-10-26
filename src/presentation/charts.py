@@ -12,7 +12,11 @@ from pydantic import Field, model_validator
 from src.common.colors import hex_to_int
 from src.errors import NativeError, native_errors
 from src.models import DocumentInput, InputModel, JsonObject, NativeObject
-from src.native.rpc import RpcObject
+from src.native.objects import (
+    read_collection,
+    require_feature,
+    supports_feature,
+)
 from src.native.runtime import get_session
 from src.native.state import temporary_attributes
 from src.presentation.navigation import goto_slide
@@ -352,24 +356,40 @@ def _read_chart_series(
     chart: NativeObject,
 ) -> tuple[list[str], list[JsonObject]]:
     """Read plotted values, rejecting mismatched categories."""
+    if not supports_feature(chart, "chart_series_names"):
+        records = read_collection(
+            chart.SeriesCollection(),
+            ("XValues", "Values"),
+        )
+    else:
+        records = [
+            {"Name": item.Name, "XValues": item.XValues, "Values": item.Values}
+            for item in (
+                chart.SeriesCollection(index)
+                for index in range(1, chart.SeriesCollection().Count + 1)
+            )
+        ]
     categories: list[str] = []
     series_list: list[JsonObject] = []
-    for index in range(1, chart.SeriesCollection().Count + 1):
-        item = chart.SeriesCollection(index)
-        item_categories = [str(value) for value in item.XValues]
-        if index == 1:
+    for index, item in enumerate(records):
+        item_categories = [str(value) for value in item["XValues"]]
+        if index == 0:
             categories = item_categories
         elif item_categories != categories:
             raise ValueError("Chart series have different category lists")
-        series_list.append({"name": item.Name, "values": list(item.Values)})
+        series_list.append(
+            {"name": item.get("Name"), "values": list(item["Values"])}
+        )
     return categories, series_list
 
 
-def _read_rpc_chart(chart: RpcObject) -> tuple[list[str], list[JsonObject]]:
-    """Activate Linux chart data once and wait only for readable series.
+def _read_external_chart(
+    chart: NativeObject,
+) -> tuple[list[str], list[JsonObject]]:
+    """Activate chart data once and wait only for readable series.
 
     Activation may show the data editor. Its workbook cannot be reliably
-    obtained through Linux RPC, so WPS retains ownership of that editor.
+    obtained through these bindings, so WPS retains ownership of the editor.
     """
     chart.ChartData.Activate()
     deadline = time.monotonic() + 5.0
@@ -407,11 +427,11 @@ def add_chart(params: AddChartInput) -> JsonObject:
         -1, type_int, params.left, params.top, params.width, params.height
     )
     chart = chart_shape.Chart
-    if isinstance(chart, RpcObject):
-        _read_rpc_chart(chart)
-    else:
+    if supports_feature(chart, "chart_workbook"):
         with chart_workbook(chart, own_existing=True):
             pass
+    elif supports_feature(chart, "chart_activation"):
+        _read_external_chart(chart)
     type_name = CHART_TYPE_NAMES.get(type_int, str(type_int))
     return {
         "success": True,
@@ -445,11 +465,7 @@ def set_chart_data(params: SetChartDataInput) -> JsonObject:
     """
     shape = _get_chart_shape(params, navigate=False)
     chart = shape.Chart
-    if isinstance(chart, RpcObject):
-        raise NotImplementedError(
-            "Linux WPS RPC cannot safely edit embedded chart workbooks; "
-            "chart data was not changed"
-        )
+    require_feature(chart, "chart_workbook")
     goto_slide(get_session("wpp").get_application(), params.slide_index)
     with chart_workbook(chart) as workbook:
         worksheet = workbook.Worksheets(1)
@@ -496,16 +512,19 @@ def get_chart_data(params: GetChartDataInput) -> JsonObject:
     """Read categories and plotted series from a native chart.
 
     Returns the category labels and all series (name + values). Identify
-    the chart by shape name or 1-based shape index. Linux may open the
-    chart data editor while initializing readable series.
+    the chart by shape name or 1-based shape index. Linux may open the data
+    editor. macOS reads cached labels and returns null for series names;
+    new chart labels may be empty until WPS initializes them.
     """
     shape = _get_chart_shape(params, navigate=False)
     chart = shape.Chart
-    if isinstance(chart, RpcObject):
-        categories, series_list = _read_rpc_chart(chart)
-    else:
+    if supports_feature(chart, "chart_workbook"):
         with chart_workbook(chart):
             categories, series_list = _read_chart_series(chart)
+    elif supports_feature(chart, "chart_activation"):
+        categories, series_list = _read_external_chart(chart)
+    else:
+        categories, series_list = _read_chart_series(chart)
     return {
         "success": True,
         "shape_name": shape.Name,
@@ -770,7 +789,8 @@ def change_chart_type(params: ChangeChartTypeInput) -> JsonObject:
     """Change the type of an existing chart.
 
     Accepts a friendly name (e.g. 'bar', 'line', 'pie') or XlChartType
-    integer. The chart data is preserved when changing types.
+    integer. WPS may initialize default category/series labels on macOS;
+    read get_data afterwards when exact default labels matter.
     """
     shape = _get_chart_shape(params)
     chart = shape.Chart

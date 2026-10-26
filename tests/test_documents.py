@@ -1,8 +1,14 @@
 """Preserve existing file bytes and never replay failed native writes."""
 
+import http.client
+import json
+import socket
 from collections.abc import Mapping, Set
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Event, Thread
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 from zipfile import ZipFile
 
@@ -11,7 +17,10 @@ from pydantic import ValidationError
 
 from src.common import files, paths
 from src.documents import models, service
+from src.errors import UnknownOutcomeError
+from src.native import macos
 from src.native.components import SPECS
+from src.native.worker import StaWorker
 
 
 @pytest.fixture
@@ -256,6 +265,122 @@ def test_failed_restore_retains_recovery_copy(
     recovery = list(tmp_path.glob(".*.recovery-*"))
     assert len(recovery) == 1
     assert recovery[0].read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("failure", ["timeout", "disconnect"])
+@pytest.mark.parametrize("destination", ["same", "overwrite", "new"])
+def test_unknown_save_keeps_recovery_until_remote_write_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+    session: SimpleNamespace,
+    tmp_path: Path,
+    failure: str,
+    destination: str,
+) -> None:
+    document = session.get_document()
+    path = (
+        Path(document.FullName)
+        if destination == "same"
+        else tmp_path / "destination.docx"
+    )
+    existing = destination != "new"
+    if existing:
+        path.write_bytes(b"original")
+    started, release, finished = Event(), Event(), Event()
+    calls: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers["Content-Length"]))
+            calls.append(self.path)
+            if self.path == "/session":
+                value: Any = {"sessionId": "delayed-save"}
+            else:
+                if existing:
+                    path.write_bytes(b"partial native write")
+                started.set()
+                if failure == "disconnect":
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    self.close_connection = True
+                if not release.wait(5):
+                    return
+                path.write_bytes(b"completed native write")
+                finished.set()
+                value = json.dumps({"result": None})
+            payload = json.dumps(
+                {"status": 0, "isSuccess": True, "value": value}
+            ).encode()
+            try:
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            except OSError:
+                pass
+
+    # Use local TCP so the real HTTP timeout path also runs on Windows CI.
+    host = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=host.serve_forever, daemon=True)
+    thread.start()
+    driver = macos.MacDriver(tmp_path)
+    monkeypatch.setattr(driver, "_select", Mock(return_value=(tmp_path, 4242)))
+    monkeypatch.setattr(
+        macos,
+        "UnixHttpConnection",
+        lambda path, timeout: http.client.HTTPConnection(
+            "127.0.0.1", host.server_port, timeout=timeout
+        ),
+    )
+
+    def save(*args: object) -> None:
+        driver.execute("writer", "app.ActiveDocument.Save();", timeout=0.2)
+
+    document.Save.side_effect = save
+    document.SaveAs.side_effect = save
+    params = models.SaveInput(
+        component="writer",
+        file_path=None if destination == "same" else str(path),
+        overwrite=destination == "overwrite",
+    )
+    worker = StaWorker("delayed save")
+    try:
+        with pytest.raises(
+            UnknownOutcomeError, match="save outcome is unknown"
+        ) as caught:
+            worker.execute(service.save_document, params)
+        assert started.is_set() and not finished.is_set()
+        assert path.read_bytes() == (
+            b"partial native write" if existing else b""
+        )
+        recovery = list(tmp_path.glob(".*.recovery-*"))
+        assert len(recovery) == int(existing)
+        if existing:
+            assert recovery[0].read_bytes() == b"original"
+            assert str(recovery[0]) in str(caught.value)
+        else:
+            assert "Original bytes" not in str(caught.value)
+        assert "Existing destination bytes were preserved" not in str(
+            caught.value
+        )
+        assert str(path) in str(caught.value)
+        assert "Wait for WPS to finish" in str(caught.value)
+        with pytest.raises(UnknownOutcomeError, match="unknown outcome"):
+            driver.execute("writer", "app.ActiveDocument.Save();")
+        assert len(calls) == 2
+        assert document.Save.call_count + document.SaveAs.call_count == 1
+        release.set()
+        assert finished.wait(3)
+        assert path.read_bytes() == b"completed native write"
+        if existing:
+            assert recovery[0].read_bytes() == b"original"
+    finally:
+        release.set()
+        host.shutdown()
+        host.server_close()
+        thread.join(timeout=2)
+        assert worker.close()
 
 
 def test_save_success_updates_target(

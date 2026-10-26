@@ -68,7 +68,9 @@ def build_server() -> WpsServer:
         version=__version__,
         lifespan=lifespan,
         instructions=(
-            "Control WPS Writer, ET and Presentation on Windows and Linux. "
+            "Control WPS Writer, ET and Presentation on Windows, Linux "
+            "and macOS. macOS uses WPS's built-in local driver and shares "
+            "the running desktop application without installing add-ins. "
             "Linux uses MCP-managed WPS instances and requires CPython 3.11. "
             "Existing Linux desktop windows are not adopted. "
             "Start with wps_components using operation=detect. "
