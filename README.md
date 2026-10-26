@@ -19,11 +19,14 @@
 
 <table>
   <tr>
-    <td width="50%" valign="top">
+    <td width="33%" valign="top">
       <video src="https://github.com/user-attachments/assets/e8442138-25c2-4f4f-b1a2-e12e2a6628ad" width="100%" controls></video>
     </td>
-    <td width="50%" valign="top">
+    <td width="33%" valign="top">
       <video src="https://github.com/user-attachments/assets/b1d0b250-61f4-4a40-aded-55869e5aa8c5" width="100%" controls></video>
+    </td>
+    <td width="33%" valign="top">
+      <video src="https://github.com/user-attachments/assets/01be49f9-28d5-4c4c-a78e-df98c388c9cd" width="100%" controls></video>
     </td>
   </tr>
 </table>
