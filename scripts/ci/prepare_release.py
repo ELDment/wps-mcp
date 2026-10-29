@@ -18,7 +18,7 @@ def release_version(
     *,
     development_run: int | None = None,
 ) -> str:
-    """Allocate the next dated release, optionally marking a feature build."""
+    """Allocate the next dated release, optionally as a development build."""
     if development_run is not None and development_run < 1:
         raise ValueError("Development run must be positive")
     base_version = (
@@ -57,7 +57,9 @@ def main() -> None:
         releases,
         development_run=(
             int(os.environ["GITHUB_RUN_NUMBER"])
-            if os.environ["GITHUB_REF"].startswith("refs/heads/feat/")
+            if os.environ["GITHUB_REF"].startswith(
+                ("refs/heads/feat/", "refs/heads/fix/")
+            )
             else None
         ),
     )

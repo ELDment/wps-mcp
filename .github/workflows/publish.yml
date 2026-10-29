@@ -2,7 +2,7 @@ name: Publish to PyPI
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main, "feat/**", "fix/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -54,7 +54,9 @@ jobs:
     needs: verify
     if: >-
       github.repository == 'ELDment/wps-mcp' &&
-      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feat/')) &&
+      (github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/heads/feat/') ||
+      startsWith(github.ref, 'refs/heads/fix/')) &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
