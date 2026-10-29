@@ -10,6 +10,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
+from tests.schemas import assert_inline_schema
 from wps_mcp import __version__
 
 
@@ -44,6 +45,8 @@ def test_stdio_catalog_validation_and_shutdown(entry_point: str) -> None:
                     )
                     catalog = await client.list_tools()
                     assert len(catalog.tools) == 45
+                    for tool in catalog.tools:
+                        assert_inline_schema(tool.input_schema)
                     detected = await client.call_tool(
                         "wps_components", {"params": {"operation": "detect"}}
                     )
