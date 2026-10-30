@@ -56,7 +56,11 @@ def test_component_connect_schema_defaults_to_visible() -> None:
         for tool in server._tool_manager.list_tools()
         if tool.name == "wps_components"
     )
-    connect = registered.parameters["$defs"]["wps_components_connect"]
+    connect = next(
+        variant
+        for variant in registered.parameters["properties"]["params"]["oneOf"]
+        if variant["properties"]["operation"]["const"] == "connect"
+    )
     visible = connect["properties"]["visible"]
     assert visible["type"] == "boolean"
     assert visible["default"] is True

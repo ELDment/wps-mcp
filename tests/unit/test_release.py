@@ -59,8 +59,16 @@ def test_feature_release_rejects_invalid_run_number(run: int) -> None:
         release_version(date(2026, 10, 26), [], development_run=run)
 
 
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        ("refs/heads/main", "2026.10.26.post1"),
+        ("refs/heads/feat/example", "2026.10.26.post1.dev42"),
+        ("refs/heads/fix/example", "2026.10.26.post1.dev42"),
+    ],
+)
 def test_release_changes_metadata_without_rewriting_package_source(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ref: str, expected: str
 ) -> None:
     monkeypatch.chdir(tmp_path)
     project = tmp_path / "pyproject.toml"
@@ -83,15 +91,16 @@ def test_release_changes_metadata_without_rewriting_package_source(
         "datetime",
         Mock(now=Mock(return_value=datetime(2026, 10, 26))),
     )
-    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setenv("GITHUB_REF", ref)
+    monkeypatch.setenv("GITHUB_RUN_NUMBER", "42")
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
 
     prepare_release.main()
 
     run.assert_called_once_with(
-        ["uv", "version", "2026.10.26.post1", "--no-sync"], check=True
+        ["uv", "version", expected, "--no-sync"], check=True
     )
-    assert "2026.10.26.post1" in summary.read_text(encoding="utf-8")
+    assert expected in summary.read_text(encoding="utf-8")
     assert source.read_bytes() == b"from importlib.metadata import version\r\n"
     for path in (project, lock):
         assert b"\n" not in path.read_bytes().replace(b"\r\n", b"")
